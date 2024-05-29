@@ -1,18 +1,14 @@
 #!/bin/python3
-abs_path = '/home/joonahuh/uni/electronic_structure/'
 
-import sys
-sys.path.append(abs_path + 'pyscf-master/')
-sys.path.append(abs_path)
-from jondelys.analysis.comm import send_notification
-from jondelys.sbi import *
+import sys, os
+sys.path.append('../adbmodule/')
+from adb import *
 import pyscf
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import datetime
 from time import time
-import os
 
 def get_files_in_folder(folder:str):
     '''Get all files in folder.
@@ -37,9 +33,9 @@ def get_molecules_in_dir(
     fs = [prefix + f for f in fs]
     molecules = []
     for fn in fs:
-        print(f'reading file {fn}')
         if fn.split('/')[-1][0] == '#':
             continue
+        print(f'reading file {fn}')
         for bs in basis_sets:
             for unc in ['', 'unc-'] if get_decontractions and 'unc-' not in bs else ['']:
                 mol = pyscf.M(
@@ -56,7 +52,7 @@ def get_molecules_in_dir(
     print(f'with filenames {[name[0] for name in molecules]}')
     return molecules
 
-def run_sbi(mol_list, send_tg_notif=False):
+def run_adb(mol_list):
     """Run subbasis iteration for molecules in mol_list
     """
     
@@ -94,7 +90,7 @@ def run_sbi(mol_list, send_tg_notif=False):
         if len(bsname) > 25:
             bsname = 'basis_NA'
 
-        f = open(abs_path + f'run/output/{".".join([molname, bsname])}.out', 'w')
+        f = open(f'output/{".".join([molname, bsname])}.out', 'w')
         f.write('{:<15s} {:<15s}\n'.format('molecule', 'basis_set'))
         f.write(f'{molname:<15s} {bsname:<15s}\n')
         f.write(f'Calculations done on {datetime.datetime.now()}\n\n')
@@ -105,7 +101,6 @@ def run_sbi(mol_list, send_tg_notif=False):
         myhf.kernel()
         end = time()
 
-        # true_scf_energies.append(myhf.e_tot)
         S = myhf.get_ovlp()
         F = myhf.get_fock()
         f.write('time stats [s]\n')
@@ -139,11 +134,6 @@ def run_sbi(mol_list, send_tg_notif=False):
         f.write('\n\n')
         
         f.close()
-        if send_tg_notif:
-            # Telegram notification
-            send_notification(f'Finished calculation for molecule {molname} with basis set {mol.basis}!')
-    if send_tg_notif:
-        send_notification(f'Finished all scheduled calculations!')
 
 
 if __name__ == '__main__':
@@ -171,4 +161,4 @@ if __name__ == '__main__':
         else:
             bs.append(b)
     mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec)
-    run_sbi(mols)
+    run_adb(mols)

@@ -1,4 +1,4 @@
-"""SubBasis Iteration package
+"""Adaptive basis method
 
 
 """
@@ -259,12 +259,12 @@ def get_sub_scf_attributes(mol, fock, overlap):
 
 def create_uncontracted_molecule_copy(mol, verbose=0):
     unctr_basis = get_uncontr_basis(mol)
-    copymol = pyscf.M(
+    cmol = pyscf.gto.M(
                 atom = mol.atom,
                 basis = unctr_basis,
-                verbose = verbose
+                verbose = 0
             )
-    return copymol
+    return cmol
 
 def print_data(mask, cursum, diff, E_scf="-", E_scfocc="-", Qsqrd="-", print_header=False):
     if print_header:
@@ -304,6 +304,8 @@ def find_subspace(F, S, mol, scf, conv_tol=1e-2, verbose=True, collect_data=Fals
         1D boolean ndarray. A mask with selected function indices set to True. If collect_data is True, an ndarray is also returned with data as described in Args section. Shell mask is returned instead of function mask if get_smask is True.
     '''
     unctr_mol = create_uncontracted_molecule_copy(mol)
+    # print('unctr_mol has', len(unctr_mol._bas), 'shells')
+    # print('decontracted has', len(mol.decontract_basis()[0]._bas), 'shells')
     # mask or smask initialization
     Fii = np.diag(F)
     mask = [False] * unctr_mol.nao_nr()
