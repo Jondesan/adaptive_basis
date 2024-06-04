@@ -8,10 +8,12 @@ import pyscf
 import numpy as np
 from scipy.linalg import fractional_matrix_power, eig
 from time import time
+from itertools import count
 import re
 import copy
 import os
 
+LINK_SHELLS = True
 
 def eigh(h, s, get_idx=False):
     '''Modified canonical orthogonalisation.
@@ -122,7 +124,6 @@ def maskidx_to_smaskidx(mask, smask, cart=False):
     for i,sm in enumerate(smask):
         l = sm[2]
         for j in range( (l + 1)*(l + 2) // 2 if cart else 2*l+1 ):
-            # print(counter, j, i, l, sm)
             mapping[counter] = i
             counter += 1
     return mapping
@@ -130,7 +131,6 @@ def maskidx_to_smaskidx(mask, smask, cart=False):
 def init_smask(mol, cart=False):
     '''Initialize the shell mask array. smask will be a list of lists, with length equal to the number of uncontracted shells, and each element is a two element list, first is bool that specifies the mask for the current shell, the other how many primitives in this shell.
     '''
-    # ibs = mol._bas # internal basis struct
     smask = []
 
     count = np.zeros((mol.natm, 9), dtype=int)
@@ -147,9 +147,14 @@ def init_smask(mol, cart=False):
             shl_start = coreshl[l]+count[ia,l]+l+1
         count[ia,l] += nc
         for n in range(shl_start, shl_start+nc):
-            smask.append([False, (l + 1)*(l + 2) // 2 if cart else 2*l+1, l])
+            smask.append([
+                False,
+                (l + 1)*(l + 2) // 2 if cart else 2*l+1,
+                l,
+                (ia, symb, n, pyscf.lib.param.ANGULAR[l].capitalize())
+                ])
 
-    return smask
+    return np.array(smask, dtype=object)
 
 def smask_to_mask(smask, cart=False):
     '''Convert current shell mask into function mask.
@@ -161,7 +166,7 @@ def smask_to_mask(smask, cart=False):
             rb = sum(funcs_per_shell[:i])
             re = rb + sm[1]
             mask[rb:re] = [True]*(re-rb)
-    return mask
+    return np.array(mask, dtype=bool)
 
 def mask_to_smask(mask, smask, cart=False):
     '''Flip shells of smask to True that have 1 or more functions set to True in mask.
@@ -242,6 +247,8 @@ def expand_mask(F, S, nocc, mask, smask=None, variant=0, fullbasis_mol=None, sub
     '''
     evals, coeffs = eigh(F[mask,:][:,mask], S[mask,:][:,mask])
     last_sum = 0.0
+    hcore = pyscf.scf.hf.get_hcore(fullbasis_mol)
+    global LINK_SHELLS
 
     if smask is None or variant == 0:
         last_sum = np.sum(evals[:nocc])
@@ -252,7 +259,7 @@ def expand_mask(F, S, nocc, mask, smask=None, variant=0, fullbasis_mol=None, sub
         subbasis_mol._bas = newbas
         match variant:
             case 1:
-                criteria_input = [evals, nocc, pyscf.scf.hf.get_hcore(subbasis_mol), coeffs]
+                criteria_input = [evals, nocc, hcore[mask,:][:,mask], coeffs]
             case 2:
                 _, Cfull = eigh(F, S)
                 criteria_input = [Cfull, coeffs, fullbasis_mol, subbasis_mol, nocc]
@@ -277,24 +284,44 @@ def expand_mask(F, S, nocc, mask, smask=None, variant=0, fullbasis_mol=None, sub
                 0, criteria_input
             )))
     else:
-        for i, sm in enumerate(smask):
-            if sm[0]:
+        # Gather indices of duplicate shells if LINK_SHELLS enabled
+        # (if system has more than 1 atom of same type, shells will be duplicated.)
+        shl_indices = []
+        if LINK_SHELLS:
+            atoms_found = []
+            shells = [''.join([str(s) for s in sm[3][1:]]) for sm in smask]
+            for i, sm in enumerate(smask):
+                if ''.join([str(s) for s in sm[3][1:]]) not in atoms_found:
+                    atoms_found.append(''.join([str(s) for s in sm[3][1:]]))
+                    indices = [ind for ind,
+                                ele in zip(count(),
+                                            shells) if ele == ''.join([str(s) for s in sm[3][1:]])]
+                    shl_indices.append(indices)
+        else:
+            shl_indices = [[i] for i in range(len(smask))]
+
+
+        for i, sidx in enumerate(shl_indices):
+            if smask[sidx][0,0]:
                 continue
             test_smask = copy.deepcopy(smask)
-            test_smask[i][0] = True
+
+            submask = test_smask[sidx]
+            submask[:,0] = True
+            test_smask[sidx] = submask
             test_mask = smask_to_mask(test_smask)
 
             evals, coeffs = eigh(F[test_mask,:][:,test_mask], S[test_mask,:][:,test_mask])
             if variant != 0:
                 subbasis_mol = create_uncontracted_molecule_copy(fullbasis_mol)
-                newmask = [sm[0] for sm in test_smask]
+                newmask = test_smask[:,0].astype(bool)
                 newbas = fullbasis_mol._bas[newmask]
                 subbasis_mol._bas = newbas
             match variant:
                 case 0:
                     criteria_input = [evals, nocc]
                 case 1:
-                    criteria_input = [evals, nocc, pyscf.scf.hf.get_hcore(subbasis_mol), coeffs]
+                    criteria_input = [evals, nocc, hcore[test_mask,:][:,test_mask], coeffs]
                 case 2:
                     criteria_input = [Cfull, coeffs, fullbasis_mol, subbasis_mol, nocc]
 
@@ -309,7 +336,9 @@ def expand_mask(F, S, nocc, mask, smask=None, variant=0, fullbasis_mol=None, sub
     if smask is None:
         mask[current_idx_to_flip] = True
     else:
-        smask[current_idx_to_flip][0] = True
+        submask = smask[shl_indices[current_idx_to_flip]]
+        submask[:,0] = True
+        smask[shl_indices[current_idx_to_flip]] = submask
         mask = smask_to_mask(smask)
     return mask, test_differences[array_index], test_sums[array_index][1], smask
 
@@ -350,21 +379,18 @@ def create_uncontracted_molecule_copy(mol, verbose=0):
 def print_data(
     mask, criteria_value, diff, ao_or_shell_label,
     E_scf="-", Qsqrd="-",
-    # E_scfocc="-",
     print_header=False
     ):
     if print_header:
-        print(f'\n{"N_func":>10s}\t{"Added ao/shell":>16s}\t{"Criteria val":>15s}\t{"Difference":>15s}\t{"E_subbasSCF":>15s}\t{"Q^2":>15s}')
+        print(f'\n{"N_func":>10s}  {"Added ao/shell(s)":>18s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>15s}')
 
     if E_scf is None: E_scf = '-'
-    # if E_scfocc is None: E_scfocc = '-'
     if Qsqrd is None: Qsqrd = '-'
 
-    print(f'{sum(mask):10}\t{ao_or_shell_label:>16}\t{criteria_value:15.9f}\t', end='')
-    print(f'{diff:{">15s" if type(diff) is str else "15.9f"}}\t', end='')
-    print(f'{E_scf:{">15s" if type(E_scf) is str else "15.9f"}}\t', end='')
-    # print(f'{E_scfocc:{">15s" if type(E_scfocc) is str else "15.9f"}}\t', end='')
-    print(f'{Qsqrd:{">15s" if type(Qsqrd) is str else "15.9f"}}')
+    print(f'{sum(mask):10}  {ao_or_shell_label:>18}  {criteria_value:15.9f}', end='')
+    print(f'  {diff:{">15s" if type(diff) is str else "15.9f"}}', end='')
+    print(f'  {E_scf:{">15s" if type(E_scf) is str else "15.9f"}}', end='')
+    print(f'  {Qsqrd:{">15s" if type(Qsqrd) is str else "15.9f"}}')
 
 def get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc):
     '''Calculates the square of the projection Q
@@ -406,6 +432,7 @@ def find_subspace(F, S, mol, scf, conv_tol=1e-2, verbose=True, collect_data=Fals
     Returns:
         1D boolean ndarray. A mask with selected function indices set to True. If collect_data is True, an ndarray is also returned with data as described in Args section. Shell mask is returned instead of function mask if get_smask is True.
     '''
+    global LINK_SHELLS
     fullbasis_mol = create_uncontracted_molecule_copy(mol)
     # mask or smask initialization
     Fii = np.diag(F)
@@ -439,34 +466,25 @@ def find_subspace(F, S, mol, scf, conv_tol=1e-2, verbose=True, collect_data=Fals
         Q_sqrd = None
 
     if collect_data:
-        dataframe = [[sum(mask), previous_sum, 0.0, scf_energy, scf_orbital_energy, Q_sqrd, smask]]
+        dataframe = [[sum(mask), previous_sum, 0.0, scf_energy, scf_orbital_energy, Q_sqrd, copy.deepcopy(smask)]]
 
     if verbose:
-        label = np.array(fullbasis_mol.ao_labels())[mask]
+        ao_labels = np.array(fullbasis_mol.ao_labels())[mask]
         if get_smask:
-            label = ' '.join(label[0].split()[:3])
+            num, symb = ao_labels[0].split()[:2]
+            label = '' if LINK_SHELLS else f'{num} '
+            label += f'{symb} {ao_labels[0].split()[2][:2]}'
         else:
-            label = label[0].strip()
+            label = so_labels[0].strip()
         print_data(mask, previous_sum, "-", label, scf_energy, Q_sqrd, print_header=True)
 
     last_mask = copy.deepcopy(mask)
     while(True):
         start = time()
-        if variant == 2 and get_smask != None:
-            mask, difference, current_criteria_val, smask = expand_mask(
-                F, S, nocc, mask, fullbasis_mol=fullbasis_mol, subbasis_mol=subbasis_mol,
-                smask=smask, variant=variant, Cfull=scf.mo_coeff
-                )
-        elif variant == 0:
-            mask, difference, current_criteria_val, smask = expand_mask(
-                F, S, nocc, mask,
-                smask=smask, variant=variant
-                )
-        elif variant == 1:
-            mask, difference, current_criteria_val, smask = expand_mask(
-                F, S, nocc, mask, fullbasis_mol=fullbasis_mol,
-                smask=smask, variant=variant
-                )
+        mask, difference, current_criteria_val, smask = expand_mask(
+            F, S, nocc, mask, fullbasis_mol=fullbasis_mol, subbasis_mol=subbasis_mol,
+            Cfull=scf.mo_coeff, smask=smask, variant=variant
+            )
         end = time()
 
         subbasis_mol = create_uncontracted_molecule_copy(fullbasis_mol)
@@ -482,14 +500,16 @@ def find_subspace(F, S, mol, scf, conv_tol=1e-2, verbose=True, collect_data=Fals
 
             dataframe.append(
                 [sum(mask), current_criteria_val, difference, scf_energy,
-                scf_orbital_energy, Q_sqrd, smask]
+                scf_orbital_energy, Q_sqrd, copy.deepcopy(smask)]
             )
         if verbose:
+            # Get added function/shell label
             changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
-            label = np.array(fullbasis_mol.ao_labels())[changes]
+            ao_labels = np.array(fullbasis_mol.ao_labels())[changes]
             if get_smask:
-                num, symb = label[0].split()[:2]
-                label = f'{num} {symb} {label[0].split()[2][:2]}'
+                num, symb = ao_labels[0].split()[:2]
+                label = '' if LINK_SHELLS else f'{num} '
+                label += f'{symb} {ao_labels[0].split()[2][:2]}'
             else:
                 label = label[0].strip()
             print_data(mask, current_criteria_val, difference, label, scf_energy, Q_sqrd)
