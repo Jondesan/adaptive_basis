@@ -12,7 +12,7 @@ matplotlib.rc('font', **font)
 ylabels = [
     r'$\Delta E_{(n-1,n)}$ [hartree]',
     r'$\Delta \frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii})$',
-    r'Q'
+    r'$\Delta Q$'
 ]
 legend_labels = [
     r'shl by shl: $\Delta E_{orb}=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$',

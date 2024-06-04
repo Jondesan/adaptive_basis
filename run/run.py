@@ -2,7 +2,7 @@
 
 import sys, os, argparse
 sys.path.append('../adbmodule/')
-from adb import *
+import adb
 import pyscf
 import numpy as np
 import pandas as pd
@@ -43,8 +43,8 @@ def get_molecules_in_dir(
                     basis = unc + bs,
                     verbose = 0,
                 )
-                smask = init_smask(mol)
-                molecules.append([fn.split('/')[-1], mol, create_uncontracted_molecule_copy(mol), smask])
+                smask = adb.init_smask(mol)
+                molecules.append([fn.split('/')[-1], mol, adb.create_uncontracted_molecule_copy(mol), smask])
 
     # Sort by number of electrons, then by the basis, then by number of basis fcts
     molecules.sort(key=lambda x: (x[1].tot_electrons(), x[1].basis, x[1].nao_nr()))
@@ -109,7 +109,7 @@ def run_adb(mol_list, variant=0):
 
         if variant == 0:
             start = time()
-            _, data_fbyf = find_subspace(
+            _, data_fbyf = adb.find_subspace(
                 F, S, mol, myhf,
                 conv_tol=1e-4, collect_data=True, variant=variant
                 )
@@ -121,7 +121,7 @@ def run_adb(mol_list, variant=0):
             f.write('{:<15s}'.format('-'))
 
         start = time()
-        smask, data_sbys = find_subspace(
+        smask, data_sbys = adb.find_subspace(
             F, S, mol, myhf,
             conv_tol=1e-4, collect_data=True, get_smask=True, variant=variant)
         end = time()
@@ -158,41 +158,25 @@ if __name__ == '__main__':
         help='path to basis input file'
         )
     parser.add_argument(
-        '--dec', type=bool, required=False, default=False,
+        '--decontractions', action=argparse.BooleanOptionalAction, default=False,
         help='whether to run decontracted calculations too, optional. Default is False'
         )
     parser.add_argument(
         '--var', type=int, required=False, default=False, choices=[0,1,2],
         help='which minimisation criteria to use, optional. Default is 0'
         )
-
+    parser.add_argument(
+        '--linkshells', action=argparse.BooleanOptionalAction, default=True,
+        help='Turn duplicate shell linking on/off during shell by shell calculations. Default is True'
+        )
 
     args = parser.parse_args()
 
-    # parser.add_argument('--sum', dest='accumulate', action='store_const',
-    #                     const=sum, default=max,
-    #                     help='sum the integers (default: find the max)')
-
-    # if len(sys.argv) < 3:
-    #     print('Usage: python3 run.py <molpath> <basispath> [<dec> <variant>]')
-    #     print('\tmolpath:  \t the path to molecule directory')
-    #     print('\tbasispath:\t the path to file listing basis sets to be used')
-    #     print('\tdec:      \t True/False, whether to run decontracted calculations too, optional')
-    #     print('\tvariant:  \t 0,1,2, selects which variant to use for calculations. Optional, default is 0')
-    #     sys.exit()
-
-    # molpath = sys.argv[1]
-    # basispath = sys.argv[2]
-    # dec = False
-    # if len(sys.argv) == 4:
-    #     dec = bool(sys.argv[3])
-    # if len(sys.argv) == 5:
-    #     dec = bool(sys.argv[3])
-    #     variant = int(sys.argv[4])
     basispath = args.bpath
     molpath = args.mpath
-    dec = args.dec
+    dec = args.decontractions
     variant = args.var
+    adb.LINK_SHELLS = args.linkshells
 
     bs = []
     bstemp = []
@@ -200,6 +184,8 @@ if __name__ == '__main__':
     for line in f:
         bstemp.extend(line.strip('\n').split(' '))
     for b in bstemp:
+        if b[0] == '#':
+            continue
         if b.replace('-', '') not in pyscf.gto.basis.ALIAS.keys():
             print(f'Basis set {b} not found in PySCF!')
         else:
