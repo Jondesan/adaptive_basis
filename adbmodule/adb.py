@@ -24,10 +24,12 @@ def eigh(h, s, get_idx=False):
         s : ndarray
             Overlap matrix
         get_idx : bool
-            Whether to return the indices that sort the eigenvalues. Default is False
+            Whether to return the indices that sort the eigenvalues.
+            Default is False
 
     Returns:
-        Sorted eigenvalues (ascending) and coefficients, if get_idx is True the indices that sort the eigenvalues are also returned
+        Sorted eigenvalues (ascending) and coefficients, if get_idx is
+        True the indices that sort the eigenvalues are also returned
     '''
     x = pyscf.scf.addons.canonical_orth_(s, 1e-8)
     xhx = x.conj().T @ h @ x
@@ -40,17 +42,82 @@ def eigh(h, s, get_idx=False):
         return e[idx], c[idx], idx
     return e[idx], c[idx]
 
-def get_uncontr_basis(mol, fn=None):
+def extract_basis(smask, shellsep_mol):
+    '''Extract a basis from given shell mask as python dictionary in
+    pySCF format.
+
+    Args:
+        smask : ndarray
+            Shell mask. Basis will be extracted according to this.
+
+        shellsep_mol : pyscf.MoleBase object
+            molecule object from whose basis the new basis will be
+            extracted.
+            
+    Returns:
+        basis : dict
+            the masked basis of the molecule as a dictionary according
+            pySCF format.
+    '''
+
+    if len(smask) != len(shellsep_mol._bas):
+        raise ValueError(
+            'Shell mask does not match with _bas attribute!'
+            + 'Make sure the shellsep_mol objects shells have been separated'
+            + 'using the create_uncontracted_molecule_copy method.')
+    
+    atom_id = shellsep_mol._atm[:, 0]
+    asymb = [pyscf.data.elements.ELEMENTS[i] for i in list(atom_id)]
+
+    basis = dict.fromkeys(asymb)
+
+    duplicate_removed_smask = []
+    found_atoms = []
+    current_id = -1
+    # Collect unique atom smasks (if same atom is present in the shellsep_mol
+    # more than once, ignore its mask after the first occurrence)
+    for elem in copy.deepcopy(smask[smask[:,0] == True]):
+        if elem[3][1] not in found_atoms:
+            found_atoms.append(elem[3][1])
+            current_id = elem[3][0]
+        elif current_id != elem[3][0]:
+            continue
+        duplicate_removed_smask.append(elem)
+
+    duplicate_removed_smask = np.array(duplicate_removed_smask)
+
+    # Initialize distinct atoms' dictionary formatted basis structures
+    # with angular momentum l
+    for l,shl in duplicate_removed_smask[:,[2,3]]:
+        if basis[shl[1]] is None:
+            basis[shl[1]] = []
+        elif l not in [x[0] for x in basis[shl[1]]]:
+            basis[shl[1]].append([l])
+
+    # Append exponents and contraction coefficients
+    for key in basis.keys():
+        ogbas = pyscf.gto.basis.parse_nwchem.to_general_contraction(shellsep_mol._basis[key])
+        for shell in basis[key]:
+            i = shell[0]
+            key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
+            idxs = [idx[3][2]-idx[2] for idx in key_smask if idx[2] == i]
+            shell.append(np.array(ogbas[i][1:])[:,[0]+idxs].tolist())
+            
+    return basis
+
+def get_uncontr_basis(mol, fn=None): 
     '''Unravel the contracted basis of mol.
 
     Args:
         mol : pyscf.MoleBase object
             molecule object.
         fn : None or str
-            the file name to which write the basis. If None, basis will not be written into a file, only returned as a str.
+            the file name to which write the basis. If None, basis will
+            not be written into a file, only returned as a str.
 
     Returns:
-        The basis as a pySCF formatted string, which can be used with pyscf.gto.basis.parse.
+        The basis as a pySCF formatted string, which can be used with
+        pyscf.gto.basis.parse.
     '''
     line = 'BASIS "ao basis" PRINT\n'
     basis = ''
@@ -99,7 +166,8 @@ def get_shells(mol):
             The molecule object.
 
     Returns:
-        A 1D ndarray with the number of functions per shell as elements. Shells are ordered in the pyscf internal format.
+        A 1D ndarray with the number of functions per shell as elements.
+        Shells are ordered in the pyscf internal format.
     '''
     shells = np.array([], dtype=int)  # Number of functions per shell
 
@@ -129,21 +197,30 @@ def maskidx_to_smaskidx(mask, smask, cart=False):
     return mapping
 
 def init_smask(mol, cart=False):
-    '''Initialize the shell mask array. smask will be a list of lists, with length equal to the number of uncontracted shells, and each element is a two element list, first is bool that specifies the mask for the current shell, the other how many primitives in this shell.
+    '''Initialize the shell mask array. smask will be a list of lists,
+    with length equal to the number of uncontracted shells, and each
+    element is a two element list, first is bool that specifies the mask
+    for the current shell, the other how many primitives in this shell.
     '''
+    
     smask = []
 
     count = np.zeros((mol.natm, 9), dtype=int)
     for ib in range(mol.nbas):
-        ia = mol.bas_atom(ib)   # atom that given basis function sits on
-        l = mol.bas_angular(ib) # angular momentum l of given basis function
-        nc = mol.bas_nctr(ib)   # number of CGTOs for given shell
-        symb = mol.atom_symbol(ia)  # label of given atom
+        # atom that given basis function sits on
+        ia = mol.bas_atom(ib)
+        # angular momentum l of given basis function
+        l = mol.bas_angular(ib)
+        # number of CGTOs for given shell
+        nc = mol.bas_nctr(ib)
+        symb = mol.atom_symbol(ia) # label of given atom
         nelec_ecp = mol.atom_nelec_core(ia) # Number of ecp electrons
         if nelec_ecp == 0 or l > 3:
             shl_start = count[ia,l]+l+1
         else:
-            coreshl = core_configuration(nelec_ecp, atom_symbol=_std_symbol(symb))
+            coreshl = core_configuration(
+                nelec_ecp, atom_symbol=_std_symbol(symb)
+                )
             shl_start = coreshl[l]+count[ia,l]+l+1
         count[ia,l] += nc
         for n in range(shl_start, shl_start+nc):
@@ -169,7 +246,8 @@ def smask_to_mask(smask, cart=False):
     return np.array(mask, dtype=bool)
 
 def mask_to_smask(mask, smask, cart=False):
-    '''Flip shells of smask to True that have 1 or more functions set to True in mask.
+    '''Flip shells of smask to True that have 1 or more functions set to
+    True in mask.
     '''
     mapping = maskidx_to_smaskidx(mask, smask, cart)
     for i in np.argwhere(mask):
@@ -219,8 +297,12 @@ def get_iteration_criteria_value(variant, params):
             criteria = get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc)
     return criteria
 
-def expand_mask(F, S, nocc, mask, smask=None, variant=0, fullbasis_mol=None, subbasis_mol=None, Cfull=None):
-    '''Expands the current mask by either one function or one shell based on smask.
+def expand_mask(
+    F, S, nocc, mask, smask=None, variant=0,
+    fullbasis_mol=None, subbasis_mol=None, Cfull=None
+    ):
+    '''Expands the current mask by either one function or one shell
+    based on smask.
 
     Args:
         F : ndarray
@@ -232,18 +314,26 @@ def expand_mask(F, S, nocc, mask, smask=None, variant=0, fullbasis_mol=None, sub
         mask : ndarray
             The current mask. A logical 1d array
         smask : None or ndarray
-            If None functions are tested individually. Else shell by shell testing is used where shells are determined by the smask array, where the elements represent the number of functions per current shell. The shells are ordered in the PySCF internal format
+            If None functions are tested individually. Else shell by
+            shell testing is used where shells are determined by the
+            smask array, where the elements represent the number of
+            functions per current shell. The shells are ordered in the
+            PySCF internal format
         variant : int
-            Which variant to use. Specifies what will be the minimisation criteria for adding a function/shell.
+            Which variant to use. Specifies what will be the
+            minimisation criteria for adding a function/shell.
             0: $\sum_{i}^{nocc}\epsilon_i$,
-               where $epsilon_i$ are the occupied diagonal Fock matrx elements
+               where $epsilon_i$ are the occupied diagonal Fock matrx
+               elements
             1: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
                where $h_{ii}=C_i^\dagger H_{core}C_i$
             2: $\Delta Q$,
                which is $1-\frac{1}{nocc}\sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
 
     Returns:
-        The new mask (boolean ndarray), the current difference in eigenvalue sums and the current sum (energy sum of occupied orbitals), shell mask if smask is provided.
+        The new mask (boolean ndarray), the current difference in
+        eigenvalue sums and the current sum (energy sum of occupied
+        orbitals), shell mask if smask is provided.
     '''
     evals, coeffs = eigh(F[mask,:][:,mask], S[mask,:][:,mask])
     last_sum = 0.0
@@ -400,8 +490,12 @@ def get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc):
 
     return np.sum(np.sum(Q**2))
 
-def find_subspace(F, S, mol, scf, conv_tol=1e-2, verbose=True, collect_data=False, get_smask=False, variant=0):
-    '''Looks for a Fock matrix subspace that approximately solves the Roothaan equation FC=SCE below a convergence of conv_tol.
+def find_subspace(
+    F, S, mol, scf, conv_tol=1e-2, verbose=True,
+    collect_data=False, get_smask=False, variant=0
+    ):
+    '''Looks for a Fock matrix subspace that approximately solves the
+    Roothaan equation FC=SCE below a convergence of conv_tol.
 
     Args:
         F : ndarray
@@ -413,24 +507,37 @@ def find_subspace(F, S, mol, scf, conv_tol=1e-2, verbose=True, collect_data=Fals
         scf : SCF
             The converged SCF object corresponding to mol
         conv_tol : float
-            Convergence criteria used to determine when to stop the subspace iteration.
+            Convergence criteria used to determine when to stop the
+            subspace iteration.
         verbose : bool
-            Determines whether some output will be printed during calculation.
+            Determines whether some output will be printed during
+            calculation.
         collect_data : bool
-            If true, np.ndarray will be created and number of functions, current_sum, difference, total SCF energy, SCF energy of occupied orbitals and the projection onto the converged full basis wave function will be appended on every iteration.
+            If true, np.ndarray will be created and number of functions,
+             current_sum, difference, total SCF energy, SCF energy of
+             occupied orbitals and the projection onto the converged
+             full basis wave function will be appended on every
+             iteration.
         get_smask : bool
-            Whether to return the shell mask and run iteration shell by shell instead of function by function. May provide faster convergence but can also provide more functions overall.
+            Whether to return the shell mask and run iteration shell by
+            shell instead of function by function. May provide faster 
+            convergence but can also provide more functions overall.
         variant : int
-            Which variant to use. Specifies what will be the minimisation criteria for adding a function/shell.
+            Which variant to use. Specifies what will be the
+            minimisation criteria for adding a function/shell.
             0: $\sum_{i}^{nocc}\epsilon_i$,
-               where $epsilon_i$ are the occupied diagonal Fock matrx elements
+               where $epsilon_i$ are the occupied diagonal Fock matrx
+               elements
             1: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
                where $h_{ii}=C_i^\dagger H_{core}C_i$
             2: $\Delta Q$,
                which is $1-\frac{1}{nocc}\sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
 
     Returns:
-        1D boolean ndarray. A mask with selected function indices set to True. If collect_data is True, an ndarray is also returned with data as described in Args section. Shell mask is returned instead of function mask if get_smask is True.
+        1D boolean ndarray. A mask with selected function indices set to
+        True. If collect_data is True, an ndarray is also returned with
+        data as described in Args section. Shell mask is returned
+        instead of function mask if get_smask is True.
     '''
     global LINK_SHELLS
     fullbasis_mol = create_uncontracted_molecule_copy(mol)
@@ -508,7 +615,8 @@ def find_subspace(F, S, mol, scf, conv_tol=1e-2, verbose=True, collect_data=Fals
             ao_labels = np.array(fullbasis_mol.ao_labels())[changes]
             if get_smask:
                 num, symb = ao_labels[0].split()[:2]
-                label = '' if LINK_SHELLS else f'{num} '
+                label = f''
+                label += '' if LINK_SHELLS else f'{num} '
                 label += f'{symb} {ao_labels[0].split()[2][:2]}'
             else:
                 label = label[0].strip()
