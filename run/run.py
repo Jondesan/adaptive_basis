@@ -159,15 +159,15 @@ if __name__ == '__main__':
         )
     parser.add_argument(
         '--decontractions', action=argparse.BooleanOptionalAction, default=False,
-        help='whether to run decontracted calculations too, optional. Default is False'
+        help='whether to run decontracted calculations too, optional.'
         )
     parser.add_argument(
-        '--var', type=int, required=False, default=False, choices=[0,1,2],
+        '--var', type=int, required=False, default=0, choices=[0,1,2],
         help='which minimisation criteria to use, optional. Default is 0'
         )
     parser.add_argument(
         '--linkshells', action=argparse.BooleanOptionalAction, default=True,
-        help='Turn duplicate shell linking on/off during shell by shell calculations. Default is True'
+        help='Turn duplicate shell linking on/off during shell by shell calculations.'
         )
 
     args = parser.parse_args()
