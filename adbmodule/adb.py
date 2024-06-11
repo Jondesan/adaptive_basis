@@ -9,6 +9,7 @@ import numpy as np
 from scipy.linalg import fractional_matrix_power, eig
 from time import time
 from itertools import count
+from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem
 import re
 import copy
 import os
@@ -101,9 +102,45 @@ def extract_basis(smask, shellsep_mol):
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
             idxs = [idx[3][2]-idx[2] for idx in key_smask if idx[2] == i]
-            shell.append(np.array(ogbas[i][1:])[:,[0]+idxs].tolist())
+            shell.extend(np.array(ogbas[i][1:])[:,[0]+idxs].tolist())
             
     return basis
+
+def basis_to_file_nwchem(
+    basis, fn,
+    commentstring='', bsname='ao basis', cart=False,
+    print_noprint='print', additional_labels=''
+    ):
+    '''Converts the basis to NWChem format and writes it into a file.
+
+    Args:
+        basis : dict
+            PySCF formatted basis structure
+        fn : str
+            File name for basis file
+        bsname : str
+            Basis name for basis file data
+        cart : bool
+            Whether basis in cartesian or spherical geometry
+        print_noprint : str
+            NWChem print option
+        additional_labels : str
+            Additional NWChem options
+    '''
+    sph_cart = 'cartesian' if cart else 'spherical' 
+    with open(fn, 'w') as f:
+        if len(commentstring) != 0:
+            f.write(f'{commentstring}\n\n')
+        f.write(f'BASIS "{bsname}" {sph_cart} {print_noprint} ')
+        f.write(f'{additional_labels}\n')
+        
+        for asymb in basis.keys():
+            bs_atom = convert_basis_to_nwchem(asymb, basis[asymb])
+            f.write(f'{bs_atom}\n')
+        
+        f.write('END')
+    
+    return
 
 def get_uncontr_basis(mol, fn=None): 
     '''Unravel the contracted basis of mol.
