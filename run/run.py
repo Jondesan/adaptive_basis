@@ -1,64 +1,70 @@
 #!/bin/python3
 
-import sys, os, argparse
-sys.path.append('../adbmodule/')
+import sys
+import os
+import argparse
+
+sys.path.append("../adbmodule/")
 import adb
 import pyscf
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 import datetime
 from time import time
 
-def get_files_in_folder(folder:str):
-    '''Get all files in folder.
+
+def get_files_in_folder(folder: str):
+    """Get all files in folder.
 
     Args:
         folder : str
             The folder to search for files in.
-    
+
     Returns:
         List of files in the folder.
-    '''
+    """
     files = os.listdir(folder)
     return files
 
+
 def get_molecules_in_dir(
-    dirpath: str, basis_sets: list,
-    get_decontractions: bool = False
-    ):
-    
+    dirpath: str, basis_sets: list, get_decontractions: bool = False
+):
     prefix = dirpath
     fs = get_files_in_folder(prefix)
     fs = [prefix + f for f in fs]
     molecules = []
     for fn in fs:
-        if fn.split('/')[-1][0] == '#':
+        if fn.split("/")[-1][0] == "#":
             continue
-        print(f'reading file {fn}')
+        print(f"reading file {fn}")
         for bs in basis_sets:
-            for unc in ['', 'unc-'] if get_decontractions and 'unc-' not in bs else ['']:
+            for unc in (
+                ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
+            ):
                 mol = pyscf.M(
-                    atom = fn,
-                    basis = unc + bs,
-                    verbose = 0,
+                    atom=fn,
+                    basis=unc + bs,
+                    verbose=0,
                 )
                 smask = adb.init_smask(mol)
-                molecules.append([fn.split('/')[-1], mol, adb.create_uncontracted_molecule_copy(mol), smask])
+                molecules.append(
+                    [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask]
+                )
 
     # Sort by number of electrons, then by the basis, then by number of basis fcts
     molecules.sort(key=lambda x: (x[1].tot_electrons(), x[1].basis, x[1].nao_nr()))
-    print(f'read a total of {len(molecules)} molecular structures, with the following numbers of functions: {[m[1].nao_nr() for m in molecules]}')
-    print(f'with filenames {[name[0] for name in molecules]}')
+    print(
+        f"read a total of {len(molecules)} molecular structures, with the following numbers of functions: {[m[1].nao_nr() for m in molecules]}"
+    )
+    print(f"with filenames {[name[0] for name in molecules]}")
     return molecules
 
-def run_adb(mol_list, variant=0):
-    """Run subbasis iteration for molecules in mol_list
+
+def run_adb(mol_list, variant=0, lshells=True):
+    """Run subbasis iteration for molecules in mol_list"""
+
     """
-    
-    datacols = ['nfunc', 'cursum', 'diff', 'E_scf', 'E_orb', 'Qsqrd', 'smask']
-    dataframe = []
-    '''
     dataframe structure:
         dtype : list
 
@@ -81,19 +87,20 @@ def run_adb(mol_list, variant=0):
         7: occupations,
         8: full basis SCF energy
         ]
-    '''
+    """
+    datacols = ["nfunc", "cursum", "diff", "E_scf", "E_orb", "Qsqrd", "smask"]
 
     for molfilename, mol, uncmol, shells in mol_list:
         # Open the output file
         bsname = mol.basis
         molname = molfilename.split(".")[0]
         if len(bsname) > 25:
-            bsname = 'basis_NA'
+            bsname = "basis_NA"
 
-        f = open(f'output/{".".join([molname, bsname])}.out', 'w')
-        f.write('{:<15s} {:<15s} {:<15s}\n'.format('molecule', 'basis_set', 'variant'))
-        f.write(f'{molname:<15s} {bsname:<15s} {variant:<15d}\n')
-        f.write(f'Calculations done on {datetime.datetime.now()}\n\n')
+        f = open(f'output/{".".join([molname, bsname])}.out', "w")
+        f.write("{:<15s} {:<15s} {:<15s}\n".format("molecule", "basis_set", "variant"))
+        f.write(f"{molname:<15s} {bsname:<15s} {variant:<15d}\n")
+        f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
         # Set up Hartree-Fock, remove linear dependencies from basis
         myhf = mol.HF().apply(pyscf.scf.addons.remove_linear_dep_)
@@ -103,72 +110,91 @@ def run_adb(mol_list, variant=0):
 
         S = myhf.get_ovlp()
         F = myhf.get_fock()
-        f.write('time stats [s]\n')
-        f.write('{:<17s}{:<17s}{:<17s}\n'.format('t_HF', 't_fbyf', 't_sbys'))
-        f.write(f'{end-start:15.9e}  ')
+        f.write("time stats [s]\n")
+        f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
+        f.write(f"{end-start:15.9e}  ")
 
         if variant == 0:
             start = time()
             _, data_fbyf = adb.find_subspace(
-                F, S, mol, myhf,
-                conv_tol=1e-4, collect_data=True, variant=variant
-                )
+                F, S, mol, myhf, conv_tol=1e-4, collect_data=True, variant=variant
+            )
             end = time()
-        
+
         if variant == 0:
-            f.write(f'{end-start:15.9e}  ')
+            f.write(f"{end-start:15.9e}  ")
         else:
-            f.write('{:<15s}'.format('-'))
+            f.write("{:<15s}".format("-"))
 
         start = time()
         smask, data_sbys = adb.find_subspace(
-            F, S, mol, myhf,
-            conv_tol=1e-4, collect_data=True, get_smask=True, variant=variant)
+            F,
+            S,
+            mol,
+            myhf,
+            conv_tol=1e-4,
+            collect_data=True,
+            get_smask=True,
+            variant=variant,
+            link_shells=lshells,
+        )
         end = time()
 
-        f.write(f'{end-start:15.9e}\n\n')
+        f.write(f"{end-start:15.9e}\n\n")
 
         if variant == 0:
             df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
         df_sbys = pd.DataFrame(data_sbys, columns=datacols)
 
-        f.write('{:<15s} {:<15s} {:<15s}\n'.format('N_occ', 'E_HF', 'nfunc'))
-        f.write('{:<15d} {:<15f} {:<15d}\n\n'.format(np.count_nonzero(myhf.get_occ()), myhf.e_tot, mol.nao_nr()))
+        f.write("{:<15s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
+        f.write(
+            "{:<15d} {:<15f} {:<15d}\n\n".format(
+                np.count_nonzero(myhf.get_occ()), myhf.e_tot, mol.nao_nr()
+            )
+        )
 
         if variant == 0:
-            f.write('function-by-function iteration\n')
+            f.write("function-by-function iteration\n")
             df_fbyf.to_csv(f, index=False)
-            f.write('\n\n')
+            f.write("\n\n")
 
-        f.write('shell-by-shell iteration\n')
+        f.write("shell-by-shell iteration\n")
         df_sbys.to_csv(f, index=False)
-        f.write('\n\n')
-        
+        f.write("\n\n")
+
         f.close()
 
 
-if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Run adaptive basis Hartree-Fock calculations.')
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(
+        description="Run adaptive basis Hartree-Fock calculations."
+    )
     parser.add_argument(
-        '--mpath', type=str, required=True,
-        help='path to molecule directory'
-        )
+        "--mpath", type=str, required=True, help="path to molecule directory"
+    )
     parser.add_argument(
-        '--bpath', type=str, required=True,
-        help='path to basis input file'
-        )
+        "--bpath", type=str, required=True, help="path to basis input file"
+    )
     parser.add_argument(
-        '--decontractions', action=argparse.BooleanOptionalAction, default=False,
-        help='whether to run decontracted calculations too, optional.'
-        )
+        "--decontractions",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="whether to run decontracted calculations too, optional.",
+    )
     parser.add_argument(
-        '--var', type=int, required=False, default=0, choices=[0,1,2],
-        help='which minimisation criteria to use, optional. Default is 0'
-        )
+        "--var",
+        type=int,
+        required=False,
+        default=0,
+        choices=[0, 1, 2],
+        help="which minimisation criteria to use, optional. Default is 0",
+    )
     parser.add_argument(
-        '--linkshells', action=argparse.BooleanOptionalAction, default=True,
-        help='Turn duplicate shell linking on/off during shell by shell calculations.'
-        )
+        "--linkshells",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Turn duplicate shell linking on/off during shell by shell calculations.",
+    )
 
     args = parser.parse_args()
 
@@ -176,19 +202,18 @@ if __name__ == '__main__':
     molpath = args.mpath
     dec = args.decontractions
     variant = args.var
-    adb.LINK_SHELLS = args.linkshells
-
+    lshells = args.linkshells
     bs = []
     bstemp = []
     f = open(basispath)
     for line in f:
-        bstemp.extend(line.strip('\n').split(' '))
+        bstemp.extend(line.strip("\n").split(" "))
     for b in bstemp:
-        if b[0] == '#':
+        if b[0] == "#":
             continue
-        if b.replace('-', '') not in pyscf.gto.basis.ALIAS.keys():
-            print(f'Basis set {b} not found in PySCF!')
+        if b.replace("-", "") not in pyscf.gto.basis.ALIAS.keys():
+            print(f"Basis set {b} not found in PySCF!")
         else:
             bs.append(b)
     mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec)
-    run_adb(mols, variant)
+    run_adb(mols, variant=variant, lshells=lshells)
