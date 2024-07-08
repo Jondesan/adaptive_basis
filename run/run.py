@@ -49,19 +49,28 @@ def get_molecules_in_dir(
                 )
                 smask = adb.init_smask(mol)
                 molecules.append(
-                    [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask]
+                    [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None]
                 )
 
     # Sort by number of electrons, then by the basis, then by number of basis fcts
     molecules.sort(key=lambda x: (x[1].tot_electrons(), x[1].basis, x[1].nao_nr()))
     print(
-        f"read a total of {len(molecules)} molecular structures, with the following numbers of functions: {[m[1].nao_nr() for m in molecules]}"
+        f"read a total of {len(molecules)} molecular structures, with the following numbers of functions: {[int(m[1].nao_nr()) for m in molecules]}"
     )
     print(f"with filenames {[name[0] for name in molecules]}")
     return molecules
 
 
-def run_adb(mol_list, variant=0, lshells=True):
+def add_initial_guesses(ig_list, mol_list):
+    if mol_list is None:
+        mol_list = ig_list
+    else:
+        mol_list.extend(ig_list)
+
+    return mol_list
+
+
+def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4):
     """Run subbasis iteration for molecules in mol_list"""
 
     """
@@ -90,79 +99,101 @@ def run_adb(mol_list, variant=0, lshells=True):
     """
     datacols = ["nfunc", "cursum", "diff", "E_scf", "E_orb", "Qsqrd", "smask"]
 
-    for molfilename, mol, uncmol, shells in mol_list:
+    for molfilename, mol, uncmol, shells, init_guess in mol_list:
         # Open the output file
         bsname = mol.basis
         molname = molfilename.split(".")[0]
         if len(bsname) > 25:
             bsname = "basis_NA"
 
-        f = open(f'output/{".".join([molname, bsname])}.out', "w")
-        f.write("{:<15s} {:<15s} {:<15s}\n".format("molecule", "basis_set", "variant"))
-        f.write(f"{molname:<15s} {bsname:<15s} {variant:<15d}\n")
-        f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
-
         # Set up Hartree-Fock, remove linear dependencies from basis
         myhf = mol.HF().apply(pyscf.scf.addons.remove_linear_dep_)
-        start = time()
-        myhf.kernel()
-        end = time()
+        
+        if init_guess is None:
+            init_guess = ['minao']
 
-        S = myhf.get_ovlp()
-        F = myhf.get_fock()
-        f.write("time stats [s]\n")
-        f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
-        f.write(f"{end-start:15.9e}  ")
+        for ig in init_guess:
+            with open(f'output/{".".join([molname, bsname, ig])}.out', "w") as f:
+                f.write("{:<15s} {:<15s} {:<15s} {:<15s}\n".format("molecule", "basis_set", "variant", "init_guess"))
+                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15d} {ig:<15s}\n")
+                f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
-        if variant == 0:
-            start = time()
-            _, data_fbyf = adb.find_subspace(
-                F, S, mol, myhf, conv_tol=1e-4, collect_data=True, variant=variant
-            )
-            end = time()
+                start = time()
+                myhf.kernel()
+                if ig == 'SCF':
+                    dm0 = None
+                elif ig == 'sap':
+                    # dm0 = adb.init_guess_by_vsap(mol, sapbs_path='/home/joonahuh/uni/electronic_structure/bs/laikov_hf.nw')
+                    dm0 = pyscf.scf.hf.init_guess_by_vsap(mol, sapbs_path='/home/joonahuh/uni/electronic_structure/bs/laikov_hfs.nw')
+                else:
+                    dm0 = myhf.get_init_guess(key=ig)
+                end = time()
 
-        if variant == 0:
-            f.write(f"{end-start:15.9e}  ")
-        else:
-            f.write("{:<15s}".format("-"))
+                F = myhf.get_fock()#dm=dm0)
+                initF = myhf.get_fock(dm=dm0)
+                S = myhf.get_ovlp()
+                mo_energy, mo_coeff = adb.eigh(initF, S)
+                nocc = np.count_nonzero(myhf.get_occ(mo_energy, mo_coeff))
+                f.write("time stats [s]\n")
+                f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
+                f.write(f"{end-start:15.9e}  ")
 
-        start = time()
-        smask, data_sbys = adb.find_subspace(
-            F,
-            S,
-            mol,
-            myhf,
-            conv_tol=1e-4,
-            collect_data=True,
-            get_smask=True,
-            variant=variant,
-            link_shells=lshells,
-        )
-        end = time()
+                if variant == 0:
+                    start = time()
+                    _, data_fbyf = adb.find_subspace(
+                        F,
+                        S,
+                        mol,
+                        myhf,
+                        conv_tol=conv_tol,
+                        collect_data=True,
+                        variant=variant,
+                        dm0=dm0
+                    )
+                    end = time()
 
-        f.write(f"{end-start:15.9e}\n\n")
+                if variant == 0:
+                    f.write(f"{end-start:15.9e}  ")
+                else:
+                    f.write("{:<15s}".format("-"))
 
-        if variant == 0:
-            df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
-        df_sbys = pd.DataFrame(data_sbys, columns=datacols)
+                start = time()
+                smask, data_sbys = adb.find_subspace(
+                    F,
+                    S,
+                    mol,
+                    myhf,
+                    conv_tol=conv_tol,
+                    collect_data=True,
+                    get_smask=True,
+                    variant=variant,
+                    link_shells=lshells,
+                    dm0=dm0
+                )
+                end = time()
 
-        f.write("{:<15s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
-        f.write(
-            "{:<15d} {:<15f} {:<15d}\n\n".format(
-                np.count_nonzero(myhf.get_occ()), myhf.e_tot, mol.nao_nr()
-            )
-        )
+                f.write(f"{end-start:15.9e}\n\n")
 
-        if variant == 0:
-            f.write("function-by-function iteration\n")
-            df_fbyf.to_csv(f, index=False)
-            f.write("\n\n")
+                if variant == 0:
+                    df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
+                df_sbys = pd.DataFrame(data_sbys, columns=datacols)
 
-        f.write("shell-by-shell iteration\n")
-        df_sbys.to_csv(f, index=False)
-        f.write("\n\n")
+                f.write("{:<15s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
+                f.write(
+                    "{:<15d} {:<15f} {:<15d}\n\n".format(
+                        nocc, myhf.e_tot, mol.nao_nr()
+                    )
+                )
 
-        f.close()
+                if variant == 0:
+                    f.write("function-by-function iteration\n")
+                    df_fbyf.to_csv(f, index=False)
+                    f.write("\n\n")
+
+                f.write("shell-by-shell iteration\n")
+                df_sbys.to_csv(f, index=False)
+                f.write("\n\n")
+
 
 
 if __name__ == "__main__":
@@ -174,6 +205,10 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--bpath", type=str, required=True, help="path to basis input file"
+    )
+    parser.add_argument(
+        "-c", "--convtol", type=float, required=False, default=1e-4,
+        help="path to basis input file"
     )
     parser.add_argument(
         "--decontractions",
@@ -203,6 +238,7 @@ if __name__ == "__main__":
     dec = args.decontractions
     variant = args.var
     lshells = args.linkshells
+    conv_tol = args.convtol
     bs = []
     bstemp = []
     f = open(basispath)
@@ -216,4 +252,10 @@ if __name__ == "__main__":
         else:
             bs.append(b)
     mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec)
-    run_adb(mols, variant=variant, lshells=lshells)
+    for mol in mols:
+        mol[4] = add_initial_guesses(
+            ['atom', 'sap', 'SCF'],
+            mol[4]
+        )
+    # print(mols)
+    run_abs(mols, variant=variant, lshells=lshells, conv_tol=conv_tol)
