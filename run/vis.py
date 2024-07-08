@@ -5,6 +5,8 @@ import matplotlib.pyplot as plt
 import sys
 import os
 import matplotlib
+import argparse
+import operator
 
 font = {"weight": "bold", "size": 14}
 matplotlib.rc("font", **font)
@@ -15,9 +17,9 @@ ylabels = [
     r"$\Delta Q$",
 ]
 legend_labels = [
-    r"shl by shl: $\Delta E_{orb}=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
+    r"shl by shl: $\Delta E_{orb}$",#=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
     r"shl by shl: $\Delta (\frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii}))_{n-1, n}$",
-    r"shl by shl: $\Delta Q_{n-1, n}=Q_{n}-Q_{n-1}$",
+    r"shl by shl: $\Delta Q_{n-1, n}$",#=Q_{n}-Q_{n-1}$",
 ]
 
 
@@ -25,6 +27,7 @@ class MolData:
     name = ""
     basis_set = ""
     variant = None
+    init_guess = ""
     thf = 0.0
     tfbf = 0.0
     tsbs = 0.0
@@ -35,7 +38,8 @@ class MolData:
     sbsdat = pd.DataFrame()
 
     def __str__(self):
-        out = f"\n{self.name} with basis {self.basis_set}, variant {self.variant}\n\n"
+        out = f"\n{self.name} with basis {self.basis_set}, variant {self.variant}"
+        out += f", initial guess: {self.init_guess}\n\n"
         out += f"{self.thf} {self.tfbf} {self.tsbs}\n\n"
         out += f"Nocc: {self.nocc},   E_HF: {self.ehf},   nfunc: {self.nfunc}\n\n"
         out += f"{self.fbfdat.to_string()}\n\n"
@@ -55,7 +59,7 @@ def read_data(path: str):
     f = open(path)
     for i, line in enumerate(f):
         if i == 1:
-            dat.name, dat.basis_set, dat.variant = line.strip().split()
+            dat.name, dat.basis_set, dat.variant, dat.init_guess = line.strip().split()
             dat.variant = int(dat.variant)
         if i == 6:
             dat.thf, dat.tfbf, dat.tsbs = list(
@@ -93,78 +97,190 @@ def read_data(path: str):
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
-        print("Usage: python3 vis.py <datpath>")
-        print("\tdatpath:  \tthe path to data file")
-        sys.exit()
-    datpath = sys.argv[1]
-    datadir = "/".join(datpath.split("/")[:-1])
-    handle_decontraction = False
-
-    dat = read_data(datpath)
-    uncdatapath = (
-        datadir + "/" + ".".join([dat.name, "-".join(["unc", dat.basis_set]), "out"])
+    parser = argparse.ArgumentParser(
+        description="Create visualisations of ABS runs."
     )
-    handle_decontraction = os.path.isfile(uncdatapath)
+    parser.add_argument(
+        "-d", "--datpath", type=str, required=True, help="path to output files"
+    )
+    parser.add_argument(
+        "-m", "--mol", type=str, required=True, help="molecule label"
+    )
+    parser.add_argument(
+        "-b", "--bs", type=str, required=False, nargs='+',
+        help="basis sets to process. If left empty, all found basis sets will be processed."
+    )
+    parser.add_argument(
+        "-u", "--unc", action=argparse.BooleanOptionalAction,
+        default=False,
+        help="create visualisations for uncontracted runs also if output files exist, optional"
+    )
+    parser.add_argument(
+        "--plotfbyf", action=argparse.BooleanOptionalAction,
+        default=False,
+        help="plot function by funtion graphs, optional"
+    )
+    args = parser.parse_args()
 
-    dat = [dat]
+    datadir = args.datpath
+    mol = args.mol
+    bsets = args.bs    
+    handle_decontraction = args.unc
+    plotfbyf = args.plotfbyf
+
+    files = os.listdir(datadir)
+    files_to_process = list(filter(lambda f: mol in f, files))
     if handle_decontraction:
-        dat.append(read_data(uncdatapath))
+        # Doublecheck to see if any files have uncontraction output
+        handle_decontraction = any('unc' in fname for fname in files_to_process)
+    if bsets is not None:
+        # If basis sets are provided filter files to be processed to only
+        # go through selected basis set results
+        files_to_process = list(filter(lambda f: any(bs in f for bs in bsets), files_to_process))
+        if not handle_decontraction:
+            files_to_process = list(filter(lambda f: 'unc' not in f, files_to_process))        
+    else:
+        # Filter out uncontracted files if user requests not to draw them
+        if not handle_decontraction:
+            files_to_process = list(filter(lambda f: 'unc' not in f, files_to_process))
+        bsets = list(set(map(lambda fp: fp.split('.')[1], files_to_process)))
+    dat = [read_data(datadir + '/' + f) for f in files_to_process]
+    dat.sort(key = operator.attrgetter('basis_set', 'init_guess'))
+    
+    for d in dat:
+        print(d.name, d.basis_set, d.init_guess)
 
     # Convergence panels
-    figs = [
-        plt.figure(i, figsize=(10, 8), tight_layout=True)
-        for i in range(3 if handle_decontraction else 2)
-    ]
-    axs = [figs[i].add_subplot() for i in range(len(figs))]
+    ncontr = len(list(filter(lambda bs: 'unc' not in bs, bsets)))
+    nuncontr = len(bsets) - ncontr
 
-    for i in range(len(dat)):
-        if dat[i].variant == 0:
-            axs[i].semilogy(
-                dat[i].fbfdat["nfunc"][1:],
-                -dat[i].fbfdat["diff"][1:],
+
+
+    # figs = [
+    #     plt.figure(i, figsize=(10, 8), tight_layout=True)
+    #     for i in range(3 if handle_decontraction else 2)
+    # ]
+    # axs = [figs[i].add_subplot() for i in range(len(figs))]
+    ndat = len(dat)
+    figs = []
+    axs = []
+
+    panelidx = 0
+    for bset in list(filter(lambda bs: 'unc' not in bs, bsets)):
+        # print(bset)
+
+        # make 3 figures for uncontracted, contracted and projection panels,
+        # or 2 for contracted and projection panels
+        numpanels = (('unc-' + bset) in bsets) + 2
+        figs.extend([
+            plt.figure(panelidx + i, figsize=(10, 8), tight_layout=True)
+            for i in range(numpanels)
+        ])
+        axs.extend([figs[i].add_subplot() for i in range(panelidx, panelidx + numpanels)])
+
+        for df in list(filter(lambda data: bset in data.basis_set, dat)):
+            # print(df.basis_set)
+            current_panelidx = panelidx + (2 if 'unc' in df.basis_set else 0)
+            if df.variant == 0 and plotfbyf:
+                axs[current_panelidx].semilogy(
+                    df.fbfdat["nfunc"][1:],
+                    -df.fbfdat["diff"][1:],
+                    ".-",
+                    label=r"fct by fct: $\Delta E_{orb}=$" + f', init_guess: {df.init_guess}',
+                    # label=r"fct by fct: $\Delta E_{orb}=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
+                )
+
+            x, y = df.sbsdat["nfunc"][1:], df.sbsdat["E_scf"][1:] - df.ehf
+            if df.variant == 2:
+                y *= -1
+            axs[current_panelidx].semilogy(
+                x, y,
+                ".-", label=legend_labels[df.variant] + f', init_guess: {df.init_guess}',
+                )
+
+            # Projection panels
+            axs[panelidx + 1].semilogy(
+                df.sbsdat["nfunc"],
+                1 - df.sbsdat["Qsqrd"] / df.nocc,
                 ".-",
-                label=r"fct by fct: $\Delta E_{orb}=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
+                label=r"$\Delta Q_\sigma$, " + f"{df.basis_set}, nfunc: {df.nfunc}, init_guess: {df.init_guess}",
             )
-        x, y = dat[i].sbsdat["nfunc"][1:], -dat[i].sbsdat["diff"][1:]
-        if dat[i].variant == 2:
-            y *= -1
-        axs[i].semilogy(x, y, ".-", label=legend_labels[dat[i].variant])
-        axs[i].semilogy(
-            dat[i].sbsdat["nfunc"],
-            dat[i].sbsdat["E_scf"] - dat[i].ehf,
-            ".-",
-            label=r"$\Delta E^{scf}=E^{scf}_{subbasis}-E^{scf}_{full basis}$",
-        )
-        axs[i].grid(alpha=0.5)
-        axs[i].legend()
-        axs[i].set_title(
-            f"${{{dat[i].name}}}$\nBasis: {dat[i].basis_set}, nfunc: {dat[i].nfunc}",
-            fontsize=24,
-            fontweight="bold",
-        )
-        axs[i].set_ylabel(ylabels[dat[i].variant], fontsize=16)
-        axs[i].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
+        
+            axs[current_panelidx].set_title(
+                f"${{{df.name}}}$\nBasis: {df.basis_set}, nfunc: {df.nfunc}",
+                fontsize=24,
+                fontweight="bold",
+            )
 
-        # Projection panels
-        axs[-1].semilogy(
-            dat[i].sbsdat["nfunc"],
-            1 - dat[i].sbsdat["Qsqrd"] / dat[i].nocc,
-            ".-",
-            label=r"$\Delta Q_\sigma$, " + f"{dat[i].basis_set}, nfunc: {dat[i].nfunc}",
-        )
+            axs[current_panelidx].set_ylabel(ylabels[df.variant], fontsize=16)
+            axs[current_panelidx].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
 
-    axs[-1].grid(alpha=0.5)
-    axs[-1].legend()
-    axs[-1].set_title(
-        f"${{{dat[0].name}}}$\nBasis: {dat[0].basis_set}, nfunc: {dat[0].nfunc}",
-        fontsize=24,
-        fontweight="bold",
-    )
-    axs[-1].set_ylabel(
-        r"$\Delta Q_\sigma = 1 - \frac{1}{N_{occ}}\sum_{i,j}^{N_{occ}}|<i^{subbasis}|j^{full basis}>|^2$",
-        fontsize=16,
-    )
-    axs[-1].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
+            axs[panelidx + 1].set_title(
+                f"${{{df.name}}}$\nBasis: {df.basis_set}, nfunc: {df.nfunc}",
+                fontsize=24,
+                fontweight="bold",
+            )
+            axs[panelidx + 1].set_ylabel(
+                r"$\Delta Q_\sigma = 1 - \frac{1}{N_{occ}}\sum_{i,j}^{N_{occ}}|<i^{subbasis}|j^{full basis}>|^2$",
+                fontsize=16,
+            )
+            axs[panelidx + 1].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
+
+        panelidx += numpanels
+
+    for ax in axs:
+        ax.legend(fontsize=12)
+        ax.grid(alpha=.5)
+
+    # for i in range(len(axs)):
+    #     for j in range(ndat):
+    #         if dat[j].variant == 0:
+    #             axs[i].semilogy(
+    #                 dat[j].fbfdat["nfunc"][1:],
+    #                 -dat[j].fbfdat["diff"][1:],
+    #                 ".-",
+    #                 label=r"fct by fct: $\Delta E_{orb}=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
+    #             )
+    #         x, y = dat[j].sbsdat["nfunc"][1:], -dat[j].sbsdat["diff"][1:]
+    #         if dat[j].variant == 2:
+    #             y *= -1
+    #         axs[i].semilogy(x, y, ".-", label=legend_labels[dat[i].variant])
+    #         axs[i].semilogy(
+    #             dat[j].sbsdat["nfunc"],
+    #             dat[j].sbsdat["E_scf"] - dat[j].ehf,
+    #             ".-",
+    #             label=r"$\Delta E^{scf}=E^{scf}_{subbasis}-E^{scf}_{full basis}$",
+    #         )
+
+    #         # Projection panels
+    #         axs[-1].semilogy(
+    #             dat[j].sbsdat["nfunc"],
+    #             1 - dat[j].sbsdat["Qsqrd"] / dat[j].nocc,
+    #             ".-",
+    #             label=r"$\Delta Q_\sigma$, " + f"{dat[j].basis_set}, nfunc: {dat[j].nfunc}",
+    #         )
+        
+    #     axs[i].set_title(
+    #         f"${{{dat[i].name}}}$\nBasis: {dat[i].basis_set}, nfunc: {dat[i].nfunc}",
+    #         fontsize=24,
+    #         fontweight="bold",
+    #     )
+    #     axs[i].set_ylabel(ylabels[dat[i].variant], fontsize=16)
+    #     axs[i].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
+
+
+    # for i in range(len(axs)):
+    #     axs[i].grid(alpha=0.5)
+    #     axs[i].legend()
+    # axs[-1].set_title(
+    #     f"${{{dat[0].name}}}$\nBasis: {dat[0].basis_set}, nfunc: {dat[0].nfunc}",
+    #     fontsize=24,
+    #     fontweight="bold",
+    # )
+    # axs[-1].set_ylabel(
+    #     r"$\Delta Q_\sigma = 1 - \frac{1}{N_{occ}}\sum_{i,j}^{N_{occ}}|<i^{subbasis}|j^{full basis}>|^2$",
+    #     fontsize=16,
+    # )
+    # axs[-1].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
 
     plt.show()
