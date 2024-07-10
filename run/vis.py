@@ -12,7 +12,7 @@ font = {"weight": "bold", "size": 14}
 matplotlib.rc("font", **font)
 
 ylabels = [
-    r"$\Delta E_{(n-1,n)}$ [hartree]",
+    r"$E_{\rm{subscf}} - E_{\rm{fullscf}}$ [hartree]",
     r"$\Delta \frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii})$",
     r"$\Delta Q$",
 ]
@@ -137,13 +137,12 @@ if __name__ == "__main__":
         # If basis sets are provided filter files to be processed to only
         # go through selected basis set results
         files_to_process = list(filter(lambda f: any(bs in f for bs in bsets), files_to_process))
-        if not handle_decontraction:
-            files_to_process = list(filter(lambda f: 'unc' not in f, files_to_process))        
-    else:
-        # Filter out uncontracted files if user requests not to draw them
-        if not handle_decontraction:
-            files_to_process = list(filter(lambda f: 'unc' not in f, files_to_process))
         bsets = list(set(map(lambda fp: fp.split('.')[1], files_to_process)))
+    # Filter out uncontracted files if user requests not to draw them
+    if not handle_decontraction:
+        files_to_process = list(filter(lambda f: 'unc' not in f, files_to_process))
+        bsets = list(set(map(lambda fp: fp.split('.')[1], files_to_process)))
+
     dat = [read_data(datadir + '/' + f) for f in files_to_process]
     dat.sort(key = operator.attrgetter('basis_set', 'init_guess'))
     
@@ -153,8 +152,6 @@ if __name__ == "__main__":
     # Convergence panels
     ncontr = len(list(filter(lambda bs: 'unc' not in bs, bsets)))
     nuncontr = len(bsets) - ncontr
-
-
 
     # figs = [
     #     plt.figure(i, figsize=(10, 8), tight_layout=True)
@@ -167,8 +164,6 @@ if __name__ == "__main__":
 
     panelidx = 0
     for bset in list(filter(lambda bs: 'unc' not in bs, bsets)):
-        # print(bset)
-
         # make 3 figures for uncontracted, contracted and projection panels,
         # or 2 for contracted and projection panels
         numpanels = (('unc-' + bset) in bsets) + 2
