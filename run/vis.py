@@ -1,15 +1,25 @@
 #!/bin/python3
 
 import pandas as pd
+import numpy as np
 import matplotlib.pyplot as plt
 import sys
 import os
 import matplotlib
 import argparse
 import operator
+from cmcrameri import cm
 
 font = {"weight": "bold", "size": 14}
 matplotlib.rc("font", **font)
+
+ls = [
+    'solid',
+    'dashed',
+    'dashdot'
+]
+
+lw = 2.0
 
 ylabels = [
     r"$E_{\rm{subscf}} - E_{\rm{fullscf}}$ [hartree]",
@@ -153,16 +163,12 @@ if __name__ == "__main__":
     ncontr = len(list(filter(lambda bs: 'unc' not in bs, bsets)))
     nuncontr = len(bsets) - ncontr
 
-    # figs = [
-    #     plt.figure(i, figsize=(10, 8), tight_layout=True)
-    #     for i in range(3 if handle_decontraction else 2)
-    # ]
-    # axs = [figs[i].add_subplot() for i in range(len(figs))]
     ndat = len(dat)
     figs = []
     axs = []
 
     panelidx = 0
+
     for bset in list(filter(lambda bs: 'unc' not in bs, bsets)):
         # make 3 figures for uncontracted, contracted and projection panels,
         # or 2 for contracted and projection panels
@@ -173,8 +179,11 @@ if __name__ == "__main__":
         ])
         axs.extend([figs[i].add_subplot() for i in range(panelidx, panelidx + numpanels)])
 
-        for df in list(filter(lambda data: bset in data.basis_set, dat)):
-            # print(df.basis_set)
+
+        datalist = list(filter(lambda data: bset in data.basis_set, dat))
+        colors = cm.managua(np.linspace(.2, .8, len(datalist)))
+
+        for j,df in enumerate(datalist):
             current_panelidx = panelidx + (2 if 'unc' in df.basis_set else 0)
             if df.variant == 0 and plotfbyf:
                 axs[current_panelidx].semilogy(
@@ -190,15 +199,17 @@ if __name__ == "__main__":
                 y *= -1
             axs[current_panelidx].semilogy(
                 x, y,
-                ".-", label=legend_labels[df.variant] + f', init_guess: {df.init_guess}',
+                label=legend_labels[df.variant] + 
+                (f', init_guess: {df.init_guess}' if df.init_guess != 'SCF' else f', {df.init_guess}'), c=colors[j], ls=ls[ j % numpanels ], marker='o', lw=lw
                 )
 
             # Projection panels
             axs[panelidx + 1].semilogy(
                 df.sbsdat["nfunc"],
                 1 - df.sbsdat["Qsqrd"] / df.nocc,
-                ".-",
-                label=r"$\Delta Q_\sigma$, " + f"{df.basis_set}, nfunc: {df.nfunc}, init_guess: {df.init_guess}",
+                label=r"$\Delta Q_\sigma$, " + f"{df.basis_set}, nfunc: {df.nfunc}" +
+                (f', init_guess: {df.init_guess}' if df.init_guess != 'SCF' else f', {df.init_guess}'),
+                c=colors[j], ls=ls[ j % numpanels ], marker='o', lw=lw
             )
         
             axs[current_panelidx].set_title(
@@ -211,7 +222,7 @@ if __name__ == "__main__":
             axs[current_panelidx].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
 
             axs[panelidx + 1].set_title(
-                f"${{{df.name}}}$\nBasis: {df.basis_set}, nfunc: {df.nfunc}",
+                f"${{{df.name}}}$, projection",#\nBasis: {df.basis_set}, nfunc: {df.nfunc}",
                 fontsize=24,
                 fontweight="bold",
             )
