@@ -1,6 +1,6 @@
 """Adaptive basis method"""
 
-import pyscf
+# import pyscf
 import numpy as np
 from itertools import count
 from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem, to_general_contraction
@@ -575,7 +575,7 @@ def get_sub_scf_attributes(mol, fock, overlap):
 def create_shell_separated_mol(mol, verbose=0):
     """Creates a copy of mol with shells separated."""
     shell_sep_basis = get_uncontr_basis(mol)
-    cmol = pyscf.gto.M(atom=mol.atom, basis=shell_sep_basis, verbose=0)
+    cmol = gto.M(atom=mol.atom, basis=shell_sep_basis, verbose=0)
     return cmol
 
 
