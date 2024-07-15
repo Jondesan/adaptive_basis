@@ -3,11 +3,16 @@
 import pyscf
 import numpy as np
 from itertools import count
-from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem
+from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem, to_general_contraction
 from pyscf.gto.ecp import core_configuration
-from pyscf.data.elements import _std_symbol
+from pyscf.data.elements import _std_symbol, ELEMENTS
 from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
+from pyscf.scf import *
+from pyscf.scf.addons import canonical_orth_
+from pyscf import lib
+from pyscf import gto
+from pyscf import scf
 import copy
 import re
 
@@ -28,7 +33,7 @@ def eigh(h, s, get_idx=False):
         Sorted eigenvalues (ascending) and coefficients, if get_idx is
         True the indices that sort the eigenvalues are also returned
     """
-    x = pyscf.scf.addons.canonical_orth_(s, 1e-8)
+    x = canonical_orth_(s, 1e-8)
     xhx = x.conj().T @ h @ x
     e, c = np.linalg.eigh(xhx)
     c = x @ c
@@ -66,7 +71,7 @@ def extract_basis(smask, shellsep_mol):
         )
 
     atom_id = shellsep_mol._atm[:, 0]
-    asymb = [pyscf.data.elements.ELEMENTS[i] for i in list(atom_id)]
+    asymb = [ELEMENTS[i] for i in list(atom_id)]
 
     basis = dict.fromkeys(asymb)
 
@@ -95,7 +100,7 @@ def extract_basis(smask, shellsep_mol):
 
     # Append exponents and contraction coefficients
     for key in basis.keys():
-        ogbas = pyscf.gto.basis.parse_nwchem.to_general_contraction(
+        ogbas = to_general_contraction(
             shellsep_mol._basis[key]
         )
         for shell in basis[key]:
@@ -181,7 +186,7 @@ def get_uncontr_basis(mol, fn=None):
             contractions = coeffs.shape[1]
             for i in range(1, contractions):
                 line = (
-                    asy + "\t" + pyscf.lib.param.ANGULAR[shell[0]].capitalize() + "\n"
+                    asy + "\t" + lib.param.ANGULAR[shell[0]].capitalize() + "\n"
                 )
                 basis += line
                 if fn is not None:
@@ -205,7 +210,7 @@ def get_basis_dict(basis: str):
 
     dc = dict()
     for elem in basis.split("#")[1:]:
-        dc[elem[11]] = pyscf.gto.basis.parse(str(elem[11:]))
+        dc[elem[11]] = gto.basis.parse(str(elem[11:]))
     return dc
 
 
@@ -283,7 +288,7 @@ def init_smask(mol, cart=False):
                     False,
                     (angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1,
                     angl,
-                    (ia, symb, n, pyscf.lib.param.ANGULAR[angl].capitalize()),
+                    (ia, symb, n, lib.param.ANGULAR[angl].capitalize()),
                 ]
             )
 
@@ -413,7 +418,7 @@ def expand_mask(
     """
     evals, coeffs = eigh(F[mask, :][:, mask], S[mask, :][:, mask])
     last_sum = 0.0
-    hcore = pyscf.scf.hf.get_hcore(fullbasis_mol)
+    hcore = scf.hf.get_hcore(fullbasis_mol)
 
     if smask is None or variant == 0:
         last_sum = np.sum(evals[:nocc])
@@ -546,13 +551,13 @@ def get_sub_scf_attributes(mol, fock, overlap):
         The SCF energy, sum of occupied orbital energies of the
         subbasis, the MO coefficient matrix of the subbasis.
     """
-    mf = mol.HF().apply(pyscf.scf.addons.remove_linear_dep_)
+    mf = mol.HF().apply(scf.addons.remove_linear_dep_)
 
     # Diagonalize fock matrix and form guess density matrix
     if fock.shape[0] > 1:
         e, c = eigh(fock, overlap)
         occ = mf.get_occ(e, c)
-        dm = pyscf.scf.hf.make_rdm1(c, occ)
+        dm = scf.hf.make_rdm1(c, occ)
         mf.init_guess = dm
     mf.kernel()
 
@@ -602,9 +607,9 @@ def print_data(
 def get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc):
     """Calculates the square of the projection Q"""
     if mol_full.cart and mol_sub.cart:
-        ovlp = pyscf.gto.intor_cross("int1e_ovlp", mol_full, mol_sub)
+        ovlp = gto.intor_cross("int1e_ovlp", mol_full, mol_sub)
     elif not mol_full.cart and not mol_sub.cart:
-        ovlp = pyscf.gto.intor_cross("int1e_ovlp_sph", mol_full, mol_sub)
+        ovlp = gto.intor_cross("int1e_ovlp_sph", mol_full, mol_sub)
     else:
         raise RuntimeError("One of the mol objects is cartesian ans other spherical!")
     Q = Cfull[:, :nocc].T @ ovlp @ Csub[:, :nocc]
@@ -930,7 +935,7 @@ def vsap_coeffs(mol, mf=None, sapbs_path='bs/sap_grasp_small.nw'):
     V = vsap_pot(mol, sapbs_path=sapbs_path)
 
     if mf is None:
-        mf = pyscf.scf.RHF(mol)
+        mf = scf.RHF(mol)
 
     hcore = mf.get_hcore()
     S = mf.get_ovlp()
@@ -950,12 +955,12 @@ def init_guess_by_vsap(mol, sapbs_path='bs/sap_grasp_small.nw'):
             Initial guess density matrix
     '''
 
-    mf = pyscf.scf.RHF(mol)
+    mf = scf.RHF(mol)
     e, coeff = vsap_coeffs(mol, mf, sapbs_path=sapbs_path)
 
     occ = mf.get_occ(e, coeff)
 
-    dm0 = pyscf.scf.hf.make_rdm1(coeff, occ)
+    dm0 = scf.hf.make_rdm1(coeff, occ)
 
     return dm0
 
@@ -967,7 +972,7 @@ def calculate_projection(C1, C2, S, nocc):
 def calculate_sap_projection(mol, mf=None):
 
     if mf is None:
-        mf = pyscf.scf.RHF(mol)
+        mf = scf.RHF(mol)
         mf.kernel()
     elif not mf.converged:
         raise RuntimeWarning('SCF has not converged!\n'
@@ -982,7 +987,7 @@ def calculate_sap_projection(mol, mf=None):
     return calculate_projection(C_sap, C_scf, S, nocc)
 
 def sad_guess(mol):
-    from pyscf.scf import atom_hf
+    from scf import atom_hf
     atm_scf = atom_hf.get_atm_nrhf(mol)
     aoslice = mol.aoslice_by_atom()
     atm_dms = []

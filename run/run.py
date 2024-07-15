@@ -6,7 +6,7 @@ import argparse
 
 sys.path.append("../adbmodule/")
 import adb
-import pyscf
+from pyscf import scf, gto
 import numpy as np
 import pandas as pd
 import datetime
@@ -42,7 +42,7 @@ def get_molecules_in_dir(
             for unc in (
                 ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
             ):
-                mol = pyscf.M(
+                mol = gto.M(
                     atom=fn,
                     basis=unc + bs,
                     verbose=0,
@@ -107,7 +107,7 @@ def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4):
             bsname = "basis_NA"
 
         # Set up Hartree-Fock, remove linear dependencies from basis
-        myhf = mol.HF().apply(pyscf.scf.addons.remove_linear_dep_)
+        myhf = mol.HF().apply(scf.addons.remove_linear_dep_)
         
         if init_guess is None:
             init_guess = ['minao']
@@ -248,7 +248,7 @@ if __name__ == "__main__":
     for b in bstemp:
         if b[0] == "#":
             continue
-        if b.replace("-", "") not in pyscf.gto.basis.ALIAS.keys():
+        if b.replace("-", "") not in gto.basis.ALIAS.keys():
             print(f"Basis set {b} not found in PySCF!")
         else:
             bs.append(b)
