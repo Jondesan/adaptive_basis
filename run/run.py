@@ -112,6 +112,9 @@ def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4):
         if init_guess is None:
             init_guess = ['minao']
 
+        if not os.path.isdir('output'):
+            os.mkdir('output')
+
         for ig in init_guess:
             with open(f'output/{".".join([molname, bsname, ig])}.out', "w") as f:
                 f.write("{:<15s} {:<15s} {:<15s} {:<15s}\n".format("molecule", "basis_set", "variant", "init_guess"))
