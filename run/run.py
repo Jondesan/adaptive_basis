@@ -70,7 +70,7 @@ def add_initial_guesses(ig_list, mol_list):
     return mol_list
 
 
-def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4):
+def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4, sapbs='sapgraspsmall'):
     """Run subbasis iteration for molecules in mol_list"""
 
     """
@@ -127,7 +127,7 @@ def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4):
                     dm0 = None
                 elif ig == 'sap':
                     # dm0 = adb.init_guess_by_sap(mol, sapbs_path='/home/joonahuh/uni/electronic_structure/bs/laikov_hf.nw')
-                    myhf.sap_basis = 'sapgrasplarge'
+                    myhf.sap_basis = sapbs
                     dm0 = myhf.init_guess_by_sap(mol)#, sap_basis='/home/joonahuh/uni/electronic_structure/bs/laikov_hfs.nw')
                 else:
                     dm0 = myhf.get_init_guess(key=ig)
@@ -215,6 +215,10 @@ if __name__ == "__main__":
         help="path to basis input file"
     )
     parser.add_argument(
+        "--sapbasis", type=str, required=False, default='sapgraspsmall',
+        help="SAP basis, either path to file or basis name"
+    )
+    parser.add_argument(
         "--decontractions",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -243,6 +247,7 @@ if __name__ == "__main__":
     variant = args.var
     lshells = args.linkshells
     conv_tol = args.convtol
+    sapbasis = args.sapbasis
     bs = []
     bstemp = []
     f = open(basispath)
@@ -262,4 +267,6 @@ if __name__ == "__main__":
             mol[4]
         )
     # print(mols)
-    run_abs(mols, variant=variant, lshells=lshells, conv_tol=conv_tol)
+    run_abs(
+        mols,
+        variant=variant, lshells=lshells, conv_tol=conv_tol, sapbs=sapbasis)
