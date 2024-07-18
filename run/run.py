@@ -127,7 +127,7 @@ def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4):
                     dm0 = None
                 elif ig == 'sap':
                     # dm0 = adb.init_guess_by_sap(mol, sapbs_path='/home/joonahuh/uni/electronic_structure/bs/laikov_hf.nw')
-                    myhf.sap_basis = '/home/joonahuh/uni/electronic_structure/bs/laikov_hfs.nw'
+                    myhf.sap_basis = 'sapgrasplarge'
                     dm0 = myhf.init_guess_by_sap(mol)#, sap_basis='/home/joonahuh/uni/electronic_structure/bs/laikov_hfs.nw')
                 else:
                     dm0 = myhf.get_init_guess(key=ig)
