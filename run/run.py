@@ -116,9 +116,20 @@ def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4, sapbs='sapgraspsma
             os.mkdir('output')
 
         for ig in init_guess:
-            with open(f'output/{".".join([molname, bsname, ig])}.out', "w") as f:
-                f.write("{:<15s} {:<15s} {:<15s} {:<15s}\n".format("molecule", "basis_set", "variant", "init_guess"))
-                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15d} {ig:<15s}\n")
+            sapbasisname = sapbs.strip().split('/')[-1].split('.')[0]
+            if ig != 'sap':
+                fname = ".".join([molname, bsname, ig])
+            else:
+                fname = ".".join([molname, bsname, ig, sapbasisname])
+            with open(f'output/{fname}.out', "w") as f:
+                f.write("{:<15s} {:<15s} {:<15s} {:<15s}".format("molecule", "basis_set", "variant", "init_guess"))
+                if ig == 'sap':
+                    f.write(" {:<15s}".format("sap_basis"))
+                f.write("\n")
+                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15d} {ig:<15s}")
+                if ig == 'sap':
+                    f.write(f" {sapbasisname:<15s}")
+                f.write("\n")
                 f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
                 start = time()

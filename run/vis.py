@@ -38,6 +38,7 @@ class MolData:
     basis_set = ""
     variant = None
     init_guess = ""
+    sapbasisname = None
     thf = 0.0
     tfbf = 0.0
     tsbs = 0.0
@@ -49,7 +50,10 @@ class MolData:
 
     def __str__(self):
         out = f"\n{self.name} with basis {self.basis_set}, variant {self.variant}"
-        out += f", initial guess: {self.init_guess}\n\n"
+        out += f", initial guess: {self.init_guess}"
+        if self.sapbasisname is not None:
+            out += f"  sap basis: {self.sapbasisname}"
+        out += "\n\n"
         out += f"{self.thf} {self.tfbf} {self.tsbs}\n\n"
         out += f"Nocc: {self.nocc},   E_HF: {self.ehf},   nfunc: {self.nfunc}\n\n"
         out += f"{self.fbfdat.to_string()}\n\n"
@@ -69,7 +73,10 @@ def read_data(path: str):
     f = open(path)
     for i, line in enumerate(f):
         if i == 1:
-            dat.name, dat.basis_set, dat.variant, dat.init_guess = line.strip().split()
+            baseinfo = line.strip().split()
+            dat.name, dat.basis_set, dat.variant, dat.init_guess = baseinfo
+            if len(baseinfo) == 5:
+                dat.sapbasisname = baseinfo[-1]
             dat.variant = int(dat.variant)
         if i == 6:
             dat.thf, dat.tfbf, dat.tsbs = list(
