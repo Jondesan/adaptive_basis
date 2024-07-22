@@ -12,6 +12,22 @@ import pandas as pd
 import datetime
 from time import time
 
+CHARGE = {
+    'SO2': 0,
+    'CN': -1,
+    'H': 0,
+    'F': 0,
+    'ScH2': 0,
+    'TiCl4': 0,
+    'SF6': 0,
+    'H2O': 0,
+    'TiO2': 0,
+    'CH4': 0,
+    'C2H6O': 0,
+    'C2H4': 0,
+    'SH2': 0,
+    'SF2': 0
+}
 
 def get_files_in_folder(folder: str):
     """Get all files in folder.
@@ -42,11 +58,28 @@ def get_molecules_in_dir(
             for unc in (
                 ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
             ):
-                mol = gto.M(
-                    atom=fn,
-                    basis=unc + bs,
-                    verbose=0,
-                )
+                try: 
+                    mol = gto.M(
+                        atom=fn,
+                        basis=unc + bs,
+                        spin=0,
+                        verbose=0,
+                    )
+                except:
+                    try: 
+                        mol = gto.M(
+                            atom=fn,
+                            basis=unc + bs,
+                            spin=1,
+                            verbose=0,
+                        )
+                    except:
+                        mol = gto.M(
+                            atom=fn,
+                            basis=unc + bs,
+                            spin=2,
+                            verbose=0,
+                        )
                 smask = adb.init_smask(mol)
                 molecules.append(
                     [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None]
