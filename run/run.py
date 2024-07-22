@@ -32,7 +32,7 @@ def get_molecules_in_dir(
 ):
     prefix = dirpath
     fs = get_files_in_folder(prefix)
-    fs = [prefix + f for f in fs]
+    fs = [prefix + '/' + f for f in fs]
     molecules = []
     for fn in fs:
         if fn.split("/")[-1][0] == "#":
