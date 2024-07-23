@@ -63,28 +63,14 @@ def get_molecules_in_dir(
             for unc in (
                 ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
             ):
-                try: 
-                    mol = gto.M(
-                        atom=fn,
-                        basis=unc + bs,
-                        spin=0,
-                        verbose=0,
-                    )
-                except:
-                    try: 
-                        mol = gto.M(
-                            atom=fn,
-                            basis=unc + bs,
-                            spin=1,
-                            verbose=0,
-                        )
-                    except:
-                        mol = gto.M(
-                            atom=fn,
-                            basis=unc + bs,
-                            spin=2,
-                            verbose=0,
-                        )
+                fnparts = fn.split('.')
+                additional_electrons = int(fnparts[1]) if len(fnparts) > 2 else 0
+                mol = gto.M(
+                    atom=fn,
+                    basis=unc + bs,
+                    charge=additional_electrons,
+                    verbose=0,
+                )
                 smask = adb.init_smask(mol)
                 molecules.append(
                     [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None]
