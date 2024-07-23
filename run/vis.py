@@ -124,7 +124,7 @@ if __name__ == "__main__":
         "-m", "--mol", type=str, required=True, help="molecule label"
     )
     parser.add_argument(
-        "-b", "--bs", type=str, required=False, nargs='+',
+        "-b", "--bs", type=str, required=False, nargs='+', default=None,
         help="basis sets to process. If left empty, all found basis sets will be processed."
     )
     parser.add_argument(
@@ -154,7 +154,7 @@ if __name__ == "__main__":
         # If basis sets are provided filter files to be processed to only
         # go through selected basis set results
         files_to_process = list(filter(lambda f: any(bs in f for bs in bsets), files_to_process))
-        bsets = list(set(map(lambda fp: fp.split('.')[1], files_to_process)))
+    bsets = list(set(map(lambda fp: fp.split('.')[1], files_to_process)))
     # Filter out uncontracted files if user requests not to draw them
     if not handle_decontraction:
         files_to_process = list(filter(lambda f: 'unc' not in f, files_to_process))
