@@ -74,7 +74,7 @@ def read_data(path: str):
     for i, line in enumerate(f):
         if i == 1:
             baseinfo = line.strip().split()
-            dat.name, dat.basis_set, dat.variant, dat.init_guess = baseinfo
+            dat.name, dat.basis_set, dat.variant, dat.init_guess = baseinfo[:4]
             if len(baseinfo) == 5:
                 dat.sapbasisname = baseinfo[-1]
             dat.variant = int(dat.variant)
