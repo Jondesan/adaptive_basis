@@ -44,11 +44,16 @@ def get_files_in_folder(folder: str):
 
 
 def get_molecules_in_dir(
-    dirpath: str, basis_sets: list, get_decontractions: bool = False
+    molpath: str, basis_sets: list, get_decontractions: bool = False
 ):
-    prefix = dirpath
-    fs = get_files_in_folder(prefix)
-    fs = [prefix + '/' + f for f in fs]
+    """Get molecule xyz files from molpath, can be directory or single file.
+    """
+    prefix = molpath
+    if os.path.isdir(prefix):
+        fs = get_files_in_folder(prefix)
+        fs = [prefix + '/' + f for f in fs]
+    else:
+        fs = [molpath]
     molecules = []
     for fn in fs:
         if fn.split("/")[-1][0] == "#":
