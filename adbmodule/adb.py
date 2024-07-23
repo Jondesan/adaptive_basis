@@ -575,7 +575,10 @@ def get_sub_scf_attributes(mol, fock, overlap):
 def create_shell_separated_mol(mol, verbose=0):
     """Creates a copy of mol with shells separated."""
     shell_sep_basis = get_uncontr_basis(mol)
-    cmol = gto.M(atom=mol.atom, basis=shell_sep_basis, verbose=0)
+    cmol = gto.M(
+        atom=mol.atom, basis=shell_sep_basis,
+        charge=mol.charge, spin=mol.spin,
+        verbose=0)
     return cmol
 
 
