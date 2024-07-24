@@ -12,23 +12,6 @@ import pandas as pd
 import datetime
 from time import time
 
-CHARGE = {
-    'SO2': 0,
-    'CN': -1,
-    'H': 0,
-    'F': 0,
-    'ScH2': 0,
-    'TiCl4': 0,
-    'SF6': 0,
-    'H2O': 0,
-    'TiO2': 0,
-    'CH4': 0,
-    'C2H6O': 0,
-    'C2H4': 0,
-    'SH2': 0,
-    'SF2': 0
-}
-
 def get_files_in_folder(folder: str):
     """Get all files in folder.
 
