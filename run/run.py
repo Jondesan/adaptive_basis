@@ -69,7 +69,7 @@ def get_molecules_in_dir(
                     atom=fn,
                     basis=unc + bs,
                     charge=additional_electrons,
-                    verbose=0,
+                    verbose=4,
                 )
                 smask = adb.init_smask(mol)
                 molecules.append(

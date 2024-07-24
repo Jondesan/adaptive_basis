@@ -146,7 +146,7 @@ if __name__ == "__main__":
     plotfbyf = args.plotfbyf
 
     files = os.listdir(datadir)
-    files_to_process = list(filter(lambda f: mol in f, files))
+    files_to_process = list(filter(lambda f: mol == f.split('.')[0], files))
     if handle_decontraction:
         # Doublecheck to see if any files have uncontraction output
         handle_decontraction = any('unc' in fname for fname in files_to_process)
@@ -164,7 +164,12 @@ if __name__ == "__main__":
     dat.sort(key = operator.attrgetter('basis_set', 'init_guess'))
     
     for d in dat:
-        print(d.name, d.basis_set, d.init_guess)
+        print(d.name, d.basis_set, d.init_guess, end=' ')
+        if d.init_guess == 'sap':
+            print(d.sapbasisname)
+        else:
+            print()
+
 
     # Convergence panels
     ncontr = len(list(filter(lambda bs: 'unc' not in bs, bsets)))
@@ -200,7 +205,7 @@ if __name__ == "__main__":
                     label=r"fct by fct: $\Delta E_{orb}=$" + f', init_guess: {df.init_guess}',
                     # label=r"fct by fct: $\Delta E_{orb}=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
                 )
-
+            # print(bset, df.sbsdat.columns)
             x, y = df.sbsdat["nfunc"][1:], df.sbsdat["E_scf"][1:] - df.ehf
             if df.variant == 2:
                 y *= -1
