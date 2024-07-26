@@ -175,10 +175,7 @@ def run_abs(
                 if variant == 0:
                     start = time()
                     _, data_fbyf = adb.find_subspace(
-                        F,
-                        S,
-                        mol,
-                        myhf,
+                        F, S, mol, myhf,
                         conv_tol=conv_tol,
                         collect_data=True,
                         variant=variant,
@@ -193,10 +190,7 @@ def run_abs(
 
                 start = time()
                 smask, data_sbys = adb.find_subspace(
-                    F,
-                    S,
-                    mol,
-                    myhf,
+                    F, S, mol, myhf,
                     conv_tol=conv_tol,
                     collect_data=True,
                     get_smask=True,
