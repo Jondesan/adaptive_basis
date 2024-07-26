@@ -46,12 +46,16 @@ def get_molecules_in_dir(
             for unc in (
                 ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
             ):
-                fnparts = fn.split('.')
-                charge = int(fnparts[1]) if len(fnparts) > 2 else 0
+                fnparts = fn.split('/')[-1].split('.')
+                if len(fnparts) > 2:
+                    charge = int(fnparts[1])
+                else:
+                    charge = 0
                 mol = gto.M(
                     atom=fn,
                     basis=unc + bs,
                     charge=charge,
+                    spin=None,
                     verbose=4,
                 )
                 smask = adb.init_smask(mol)
@@ -226,7 +230,8 @@ if __name__ == "__main__":
         "--mpath", type=str, required=True, help="path to molecule directory"
     )
     parser.add_argument(
-        "--bpath", type=str, required=True, help="path to basis input file"
+        "--basis", type=str, required=True, nargs='+',
+        help="path to basis input file or list of basis sets to use"
     )
     parser.add_argument(
         "-c", "--convtol", type=float, required=False, default=1e-4,
@@ -259,7 +264,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    basispath = args.bpath
+    basis = np.asarray(args.basis)
     molpath = args.mpath
     dec = args.decontractions
     variant = args.var
@@ -268,9 +273,13 @@ if __name__ == "__main__":
     sapbasis = args.sapbasis
     bs = []
     bstemp = []
-    f = open(basispath)
-    for line in f:
-        bstemp.extend(line.strip("\n").split(" "))
+
+    if len(basis) == 1 and os.path.isfile(basis[0]):
+        f = open(basis)
+        for line in f:
+            bstemp.extend(line.strip("\n").split(" "))
+    else:
+        bstemp = basis
     for b in bstemp:
         if b[0] == "#":
             continue
