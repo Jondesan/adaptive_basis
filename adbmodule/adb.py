@@ -80,7 +80,7 @@ def extract_basis(smask, shellsep_mol):
     current_id = -1
     # Collect unique atom smasks (if same atom is present in the shellsep_mol
     # more than once, ignore its mask after the first one)
-    for elem in copy.deepcopy(smask[smask[:, 0] == True]):
+    for elem in copy.deepcopy(smask[smask[:, 0]]):
         if elem[3][1] not in found_atoms:
             found_atoms.append(elem[3][1])
             current_id = elem[3][0]
@@ -92,11 +92,11 @@ def extract_basis(smask, shellsep_mol):
 
     # Initialize distinct atoms' dictionary formatted basis structures
     # with angular momentum l
-    for l, shl in duplicate_removed_smask[:, [2, 3]]:
+    for angl, shl in duplicate_removed_smask[:, [2, 3]]:
         if basis[shl[1]] is None:
             basis[shl[1]] = []
-        elif l not in [x[0] for x in basis[shl[1]]]:
-            basis[shl[1]].append([l])
+        elif angl not in [x[0] for x in basis[shl[1]]]:
+            basis[shl[1]].append([angl])
 
     # Append exponents and contraction coefficients
     for key in basis.keys():
@@ -153,7 +153,7 @@ def basis_to_file_nwchem(
     return
 
 
-def get_uncontr_basis(mol, fn=None):
+def get_uncontracted_basis(mol, fn=None):
     """Unravel the contracted basis of mol.
 
     Args:
@@ -228,13 +228,11 @@ def get_shells(mol):
     shells = np.array([], dtype=int)  # Number of functions per shell
 
     for ib in range(mol.nbas):  # nbas = number of shells (basis fcts)
-        ia = mol.bas_atom(ib)  # atom that given basis function sits on
-        l = mol.bas_angular(ib)  # angular momentum l of given basis function
+        angl = mol.bas_angular(ib)  # angular momentum l of given basis function
         nc = mol.bas_nctr(ib)  # number of CGTOs for given shell
-        symb = mol.atom_symbol(ia)  # label of given atom
 
         shells = np.append(
-            shells, nc * (l + 1) * (l + 2) // 2 if mol.cart else nc * (2 * l + 1)
+            shells, nc * (angl + 1) * (angl + 2) // 2 if mol.cart else nc * (2 * angl + 1)
         )
 
     if sum(shells) != mol.nao_nr():
@@ -250,8 +248,8 @@ def maskidx_to_smaskidx(mask, smask, cart=False):
     mapping = [0] * len(mask)  # mol.nao_nr()
     counter = 0
     for i, sm in enumerate(smask):
-        l = sm[2]
-        for j in range((l + 1) * (l + 2) // 2 if cart else 2 * l + 1):
+        angl = sm[2]
+        for j in range((angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1):
             mapping[counter] = i
             counter += 1
     return mapping
@@ -536,8 +534,7 @@ def expand_mask(
 
 
 def get_sub_scf_attributes(mol, fock, overlap):
-    """Calculates converged attributes for the system using the subbasis
-    determined by mask.
+    """Calculates converged attributes for the system.
 
     Args:
         mol : pyscf.gto.MoleBase
@@ -557,11 +554,6 @@ def get_sub_scf_attributes(mol, fock, overlap):
         mf.init_guess = dm
     mf.kernel()
 
-    # electronic_energy = mf.energy_elec()
-    # hcore = pyscf.scf.hf.get_hcore(mol)
-    # idx = np.count_nonzero(mf.get_occ())#[mf.get_occ()>0]
-    # print(idx)
-    # print(electronic_energy[0])# + np.sum(np.diag(hcore)[:idx]))
     scf_energy = mf.e_tot
     nocc_sb = len(mf.mo_occ > 0)
     scf_orbital_energy = sum(np.sort(mf.mo_energy)[:nocc_sb])
@@ -570,7 +562,7 @@ def get_sub_scf_attributes(mol, fock, overlap):
 
 def create_shell_separated_mol(mol, verbose=0):
     """Creates a copy of mol with shells separated."""
-    shell_sep_basis = get_uncontr_basis(mol)
+    shell_sep_basis = get_uncontracted_basis(mol)
     cmol = gto.M(
         atom=mol.atom, basis=shell_sep_basis,
         charge=mol.charge, spin=mol.spin,
@@ -615,6 +607,18 @@ def get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc):
 
     return np.sum(np.sum(Q**2))
 
+
+def set_linked_shells(smask, val):
+    copysmask = copy.deepcopy(smask)
+    selected_shells = np.argwhere([sm[0] for sm in copysmask])
+    all_shells = np.array([''.join(map(str, sm[3][1:])) for sm in copysmask])
+    same_as_selected = np.argwhere(
+        all_shells == all_shells[selected_shells]
+    )[:,1]
+    temp = copysmask[same_as_selected][:,0]
+    temp = val
+    copysmask[same_as_selected,0] = temp
+    return copysmask
 
 def find_subspace(
     F,
@@ -696,16 +700,10 @@ def find_subspace(
     if get_smask:
         smask = init_smask(fullbasis_mol, fullbasis_mol.cart)
         smask = mask_to_smask(mask, smask, fullbasis_mol.cart)
-        if link_shells: # If link_shells, set same shells of same atoms
-        # to True
-            selected_shells = np.argwhere([sm[0] for sm in smask])
-            all_shells = np.array([''.join(map(str, sm[3][1:])) for sm in smask])
-            same_as_selected = np.argwhere(
-                all_shells == all_shells[selected_shells]
-            )[:,1]
-            temp = smask[same_as_selected][:,0]
-            temp = True
-            smask[same_as_selected,0] = temp
+        if link_shells:
+            # If link_shells true, set same shells of same atoms
+            # to True
+            set_linked_shells(smask, True)
 
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
@@ -730,7 +728,6 @@ def find_subspace(
         subbasis_mol._bas = newbas
 
         fullbasis_coeffs = scf.mo_coeff
-        # fullbasis_coeffs = copy.deepcopy(subbasis_coeffs)#scf.mo_coeff
         scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
             subbasis_mol, convF[mask, :][:, mask], S[mask, :][:, mask]
         )
@@ -769,18 +766,11 @@ def find_subspace(
     last_mask = copy.deepcopy(mask)
     while True:
         mask, difference, current_criteria_val, smask = expand_mask(
-            F,
-            S,
-            nocc,
-            mask,
+            F, S, nocc, mask,
             fullbasis_mol=fullbasis_mol,
-            subbasis_mol=subbasis_mol,
-            Cfull=scf.mo_coeff,
-            smask=smask,
-            variant=variant,
-            link_shells=link_shells,
+            subbasis_mol=subbasis_mol, Cfull=scf.mo_coeff,
+            smask=smask, variant=variant, link_shells=link_shells,
         )
-
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
         if get_smask:
             subbasis_mol._bas = fullbasis_mol._bas[[sm[0] for sm in smask]]
@@ -794,17 +784,10 @@ def find_subspace(
                     fullbasis_coeffs, subbasis_coeffs, fullbasis_mol, subbasis_mol, nocc
                 )
 
-            dataframe.append(
-                [
-                    sum(mask),
-                    current_criteria_val,
-                    difference,
-                    scf_energy,
-                    scf_orbital_energy,
-                    Q_sqrd,
-                    copy.deepcopy(smask),
-                ]
-            )
+            dataframe.append([
+                    sum(mask), current_criteria_val, difference,
+                    scf_energy, scf_orbital_energy, Q_sqrd,
+                    copy.deepcopy(smask)])
         if verbose:
             # Get most recent function/shell label
             changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
@@ -832,189 +815,3 @@ def find_subspace(
     if collect_data:
         return mask, dataframe
     return mask
-
-
-def fakemol_for_charges_sap(coords, expnt=1e16, contr_coeff=1):
-    '''Construct a fake Mole object that holds the charges on the given
-    coordinates (coords).  The shape of the charge can be a normal
-    distribution with the Gaussian exponent (expnt).
-    '''
-    nbas = coords.shape[0]
-    expnt = np.asarray(expnt).ravel()
-    contr_coeff = numpy.asarray(contr_coeff).ravel()
-
-    fakeatm = np.zeros((nbas,ATM_SLOTS), dtype=np.int32)
-    fakebas = np.zeros((nbas,BAS_SLOTS), dtype=np.int32)
-    fakeenv = [0] * PTR_ENV_START
-    ptr = PTR_ENV_START
-    fakeatm[:,PTR_COORD] = numpy.arange(ptr, ptr+nbas*3, 3)
-    fakeenv.append(coords.ravel())
-    ptr += nbas*3
-    fakebas[:,ATOM_OF] = numpy.arange(nbas)
-    fakebas[:,NPRIM_OF] = contr_coeff.size
-    fakebas[:,NCTR_OF] = 1
-    if expnt.size == 1:
-        expnt = expnt[0]
-        # approximate point charge with gaussian distribution exp(-1e16*r^2)
-        fakebas[:,PTR_EXP] = ptr
-        fakebas[:,PTR_COEFF] = ptr+1
-        fakeenv.append([expnt, contr_coeff / (2*np.sqrt(np.pi)*gaussian_int(2,expnt))])
-        ptr += 2
-    else:
-        assert expnt.size == contr_coeff.size#nbas
-        # approximate point charge with gaussian distribution exp(-expnt*r^2)
-        fakebas[:,PTR_EXP] = ptr + np.arange(nbas) * 2
-        fakebas[:,PTR_COEFF] = ptr + np.arange(nbas) * 2 + contr_coeff.size
-        coeff = contr_coeff / (2 * np.sqrt(np.pi) * gaussian_int(2, expnt))
-        fakeenv.append(np.vstack((expnt, coeff)).ravel())
-
-    fakemol = Mole()
-    fakemol._atm = fakeatm
-    fakemol._bas = fakebas
-    fakemol._env = np.hstack(fakeenv)
-    fakemol._built = True
-    return fakemol
-
-def vsap_pot(mol, sapbs_path='bs/sap_grasp_small.nw'):
-    '''Calculates the superposition of atomic potentials guess potential matrix V
-
-    Args:
-        mol : pyscf.gto.Mole
-            PySCF Mole object for which the potential is calculated
-
-    Returns:
-        V : np.array
-            The SAP potential matrix
-    '''
-    atom_coords = np.asarray([coord[1] for coord in mol._atom])
-    atoms = np.asarray([coord[0] for coord in mol._atom])
-
-    sapbas = {
-        atom: np.asarray(load(sapbs_path, atom)[0][1:]) for atom in set(atoms)
-    }
-
-    # charge sumcheck
-    Z_eff = sum([np.sum(sapbas[a][:,1]) for a in atoms])
-    if np.abs(Z_eff + mol.nelectron) > 1e-3:
-        raise RuntimeError(
-            '\n'.join([f'SAP basis coefficients must be equal or close to total electronic charge: {Z_eff} !≃ {mol.nelectron}',
-            f'Check fails with value {np.abs(Z_eff + mol.nelectron)})']))
-
-    V = np.zeros((mol.nao_nr(), mol.nao_nr()))
-    cmol = copy.deepcopy(mol)
-    nbas = cmol.nbas
-    for i, atom in enumerate(atoms):
-        expnt = sapbas[atom][:,0]
-        coeff = sapbas[atom][:,1]
-        nucleon_fakemol = fakemol_for_charges_sap(np.asarray([atom_coords[i]]), expnt, coeff)
-
-        cmol += nucleon_fakemol
-
-    shls_slice = (0, nbas, 0, nbas, nbas, cmol.nbas)
-    int3c2e = cmol.intor('int3c2e', comp=1, shls_slice=shls_slice)
-    V = -np.einsum('pqk->pq', int3c2e)
-
-    return V
-
-def vsap_coeffs(mol, mf=None, sapbs_path='bs/sap_grasp_small.nw'):
-    '''Get SAP guess orbital MO coefficients
-
-    Args:
-        mol : pyscf.gto.Mole
-            PySCF Mole object
-        mf : pyscf.scf.RHF
-            PySCF scf object corresponding to mol
-
-    Returns:
-        e : numpy.array
-            Orbital energies
-        c : numpy.array
-            Orbital coefficients
-    '''
-    V = vsap_pot(mol, sapbs_path=sapbs_path)
-
-    if mf is None:
-        mf = scf.RHF(mol)
-
-    hcore = mf.get_hcore()
-    S = mf.get_ovlp()
-    e, c = mf.eig(hcore + V, S)
-
-    return e, c
-
-def init_guess_by_vsap(mol, sapbs_path='bs/sap_grasp_small.nw'):
-    '''Forms the SAP initial guess density matrix dm0 for mol
-
-    Args:
-        mol : pyscf.gto.Mole
-            PySCF Mole object
-
-    Returns:
-        dm0 : numpy.array
-            Initial guess density matrix
-    '''
-
-    mf = scf.RHF(mol)
-    e, coeff = vsap_coeffs(mol, mf, sapbs_path=sapbs_path)
-
-    occ = mf.get_occ(e, coeff)
-
-    dm0 = scf.hf.make_rdm1(coeff, occ)
-
-    return dm0
-
-def calculate_projection(C1, C2, S, nocc):
-    Q = C1[:,:nocc].T @ S @ C2[:,:nocc]
-    return np.sum(np.sum(Q**2))/nocc
-
-
-def calculate_sap_projection(mol, mf=None):
-
-    if mf is None:
-        mf = scf.RHF(mol)
-        mf.kernel()
-    elif not mf.converged:
-        raise RuntimeWarning('SCF has not converged!\n'
-        + 'Make sure you have run the self-consistent field procedure.')
-
-    mf.init_guess = 'sap'
-    _, C_sap = vsap_coeffs(mol)
-    C_scf = mf.mo_coeff
-    S = mf.get_ovlp()
-    nocc = np.count_nonzero(mf.mo_occ)
-
-    return calculate_projection(C_sap, C_scf, S, nocc)
-
-def sad_guess(mol):
-    from scf import atom_hf
-    atm_scf = atom_hf.get_atm_nrhf(mol)
-    aoslice = mol.aoslice_by_atom()
-    atm_dms = []
-    mo_coeff = []
-    mo_occ = []
-    for ia in range(mol.natm):
-        symb = mol.atom_symbol(ia)
-        if symb not in atm_scf:
-            symb = mol.atom_pure_symbol(ia)
-
-        if symb in atm_scf:
-            e_hf, e, c, occ = atm_scf[symb]
-        else:  # symb's basis is not specified in the input
-            nao_atm = aoslice[ia,3] - aoslice[ia,2]
-            c = numpy.zeros((nao_atm, nao_atm))
-            occ = numpy.zeros(nao_atm)
-
-        atm_dms.append(numpy.dot(c*occ, c.conj().T))
-        mo_coeff.append(c)
-        mo_occ.append(occ)
-
-    dm = scipy.linalg.block_diag(*atm_dms)
-    mo_coeff = scipy.linalg.block_diag(*mo_coeff)
-    mo_occ = numpy.hstack(occ)
-
-    if mol.cart:
-        cart2sph = mol.cart2sph_coeff(normalized='sp')
-        dm = reduce(lib.dot, (cart2sph, dm, cart2sph.T))
-        mo_coeff = lib.dot(cart2sph, mo_coeff)
-
-    return mo_coeff
