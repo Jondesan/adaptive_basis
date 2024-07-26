@@ -12,6 +12,12 @@ import pandas as pd
 import datetime
 from time import time
 
+AVAIL_INIT_METHODS = [
+    'scf',
+    'atom',
+    'sap'
+]
+
 def get_files_in_folder(folder: str):
     """Get all files in folder.
 
@@ -81,7 +87,12 @@ def add_initial_guesses(ig_list, mol_list):
     return mol_list
 
 
-def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4, sapbs='sapgraspsmall'):
+def run_abs(
+    mol_list,
+    variant=0,
+    lshells=True,
+    conv_tol=1e-4,
+    sapbs='sapgraspsmall'):
     """Run subbasis iteration for molecules in mol_list"""
 
     """
@@ -148,14 +159,13 @@ def run_abs(mol_list, variant=0, lshells=True, conv_tol=1e-4, sapbs='sapgraspsma
                 if ig == 'SCF':
                     dm0 = None
                 elif ig == 'sap':
-                    # dm0 = adb.init_guess_by_sap(mol, sapbs_path='/home/joonahuh/uni/electronic_structure/bs/laikov_hf.nw')
                     myhf.sap_basis = sapbs
-                    dm0 = myhf.init_guess_by_sap(mol)#, sap_basis='/home/joonahuh/uni/electronic_structure/bs/laikov_hfs.nw')
+                    dm0 = myhf.init_guess_by_sap(mol)
                 else:
                     dm0 = myhf.get_init_guess(key=ig)
                 end = time()
 
-                F = myhf.get_fock()#dm=dm0)
+                F = myhf.get_fock()
                 initF = myhf.get_fock(dm=dm0)
                 S = myhf.get_ovlp()
                 mo_energy, mo_coeff = adb.eigh(initF, S)
@@ -238,6 +248,11 @@ if __name__ == "__main__":
         help="path to basis input file"
     )
     parser.add_argument(
+        "--init_guesses", type=str, required=False, nargs='+',
+        default='all', choices=['all', 'scf', 'sap', 'atom'],
+        help="which initialization methods to use, 'all' will select all available methods"
+    )
+    parser.add_argument(
         "--sapbasis", type=str, required=False, default='sapgraspsmall',
         help="SAP basis, either path to file or basis name"
     )
@@ -245,7 +260,7 @@ if __name__ == "__main__":
         "--decontractions",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="whether to run decontracted calculations too, optional.",
+        help="whether to run decontracted calculations too, optional",
     )
     parser.add_argument(
         "--var",
@@ -271,6 +286,7 @@ if __name__ == "__main__":
     lshells = args.linkshells
     conv_tol = args.convtol
     sapbasis = args.sapbasis
+    init_guesses = args.init_guesses
     bs = []
     bstemp = []
 
@@ -288,9 +304,11 @@ if __name__ == "__main__":
         else:
             bs.append(b)
     mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec)
+    if 'all' in init_guesses:
+        init_guesses = AVAIL_INIT_METHODS
     for mol in mols:
         mol[4] = add_initial_guesses(
-            ['atom', 'sap', 'SCF'],
+            init_guesses,
             mol[4]
         )
     # print(mols)
