@@ -366,6 +366,33 @@ def get_iteration_criteria_value(variant, params):
             criteria = get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc)
     return criteria
 
+def linked_shell_idx(smask):
+    """ Return smask indices that correspond to duplicate shells, i.e.
+    if molecule has more than one of same atom type, the shells of that atom
+    will be duplicated.
+
+    Args:
+        smask : ndarray
+            Shell mask array
+
+    Returns:
+        shl_indices : ndarray
+            Duplicate shell indices
+    """
+    atoms_found = []
+    shells = ["".join([str(s) for s in sm[3][1:]]) for sm in smask]
+
+    shl_indices = []
+    for i, sm in enumerate(smask):
+        if "".join([str(s) for s in sm[3][1:]]) not in atoms_found:
+            atoms_found.append("".join([str(s) for s in sm[3][1:]]))
+            indices = [
+                ind
+                for ind, ele in zip(count(), shells)
+                if ele == "".join([str(s) for s in sm[3][1:]])
+            ]
+            shl_indices.append(indices)
+    return shl_indices
 
 def expand_mask(
     F,
@@ -454,20 +481,8 @@ def expand_mask(
         # Gather indices of duplicate shells if link_shells enabled
         # (if system has more than 1 atom of same type,
         #  shells will be duplicated.)
-        shl_indices = []
         if link_shells:
-            atoms_found = []
-            shells = ["".join([str(s) for s in sm[3][1:]]) for sm in smask]
-
-            for i, sm in enumerate(smask):
-                if "".join([str(s) for s in sm[3][1:]]) not in atoms_found:
-                    atoms_found.append("".join([str(s) for s in sm[3][1:]]))
-                    indices = [
-                        ind
-                        for ind, ele in zip(count(), shells)
-                        if ele == "".join([str(s) for s in sm[3][1:]])
-                    ]
-                    shl_indices.append(indices)
+            shl_indices = linked_shell_idx(smask)
         else:
             shl_indices = [[i] for i in range(len(smask))]
 
@@ -517,25 +532,6 @@ def expand_mask(
         submask[:, 0] = True
         smask[shl_indices[current_idx_to_flip]] = submask
         mask = smask_to_mask(smask)
-
-        ####################################################
-        # FIGURES FOR DEBUGGING, all seems to work!
-        ####################################################
-        # import matplotlib.pyplot as plt
-        # fig, ax = plt.subplots(1, 1, figsize=(10, 6))
-        # x = np.arange(len(test_differences))
-        # ax.plot(x, test_differences, '.')
-        # for i, td in enumerate(test_differences):
-        #     text = smask[test_sums[i][0]][3]
-        #     text = ''.join(map(str, text[1:]))
-        #     ax.annotate(
-        #         text,
-        #         (x[i], td)
-        #     )
-        # ax.grid(alpha=.5)
-        # plt.show()
-        ####################################################
-
     return mask, test_differences[array_index], test_sums[array_index][1], smask
 
 
