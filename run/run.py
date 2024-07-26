@@ -299,7 +299,7 @@ if __name__ == "__main__":
     for b in bstemp:
         if b[0] == "#":
             continue
-        if b.replace("-", "") not in gto.basis.ALIAS.keys():
+        if b.replace("-", "").replace("unc", "") not in gto.basis.ALIAS.keys():
             print(f"Basis set {b} not found in PySCF!")
         else:
             bs.append(b)
