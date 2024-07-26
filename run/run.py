@@ -158,10 +158,8 @@ def run_abs(
                 myhf.kernel()
                 if ig == 'SCF':
                     dm0 = None
-                elif ig == 'sap':
-                    myhf.sap_basis = sapbs
-                    dm0 = myhf.init_guess_by_sap(mol)
                 else:
+                    myhf.sap_basis = sapbs
                     dm0 = myhf.get_init_guess(key=ig)
                 end = time()
 
