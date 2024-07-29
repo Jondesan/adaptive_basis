@@ -16,8 +16,19 @@ from pyscf import scf
 import copy
 import re
 
+def eigh(h, s):
+    """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
+    """
+    if len(h.shape) == 3:
+        ea, ca = canonical_orth(h[0], s, get_idx=False)
+        eb, cb = canonical_orth(h[1], s, get_idx=False)
+        return np.asarray([ea, eb]), np.asarray([ca, cb])
+    else:
+        return canonical_orth(h, s, get_idx=False)
 
-def eigh(h, s, get_idx=False):
+
+
+def canonical_orth(h, s, get_idx=False):
     """Modified canonical orthogonalisation.
 
     Args:
@@ -343,7 +354,13 @@ def get_iteration_criteria_value(variant, params):
     match variant:
         case 0:
             epsilon_i, nocc = params
-            criteria = np.sum(epsilon_i[:nocc])
+            RHF = (len(np.asarray(nocc).shape) == 2)
+            if RHF:
+                criteria = np.sum(epsilon_i[:nocc])
+            else:
+                criteria = np.sum(
+                    epsilon_i[0,:nocc[0]] +
+                    epsilon_i[1,:nocc[1]])
         case 1:
             epsilon_i, nocc, hcore, Csub = params
             # criteria = 0.5 * np.sum(
@@ -441,12 +458,19 @@ def expand_mask(
         eigenvalue sums and the current sum (energy sum of occupied
         orbitals), shell mask if smask is provided.
     """
-    evals, coeffs = eigh(F[mask, :][:, mask], S[mask, :][:, mask])
+    RHF = (len(F.shape) == 2)
+    if RHF:
+        evals, coeffs = eigh(F[mask,:][:,mask], S[mask, :][:, mask])
+    else:
+        evals, coeffs = eigh(F[:,mask,:][:,:,mask], S[mask, :][:, mask])
     last_sum = 0.0
     hcore = scf.hf.get_hcore(fullbasis_mol)
 
     if smask is None or variant == 0:
-        last_sum = np.sum(evals[:nocc])
+        if RHF:
+            last_sum = np.sum(evals[:nocc])
+        else:
+            last_sum = np.sum(evals[0,:nocc[0]] + evals[1,:nocc[1]])
     else:
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
         newmask = [sm[0] for sm in smask]
@@ -468,9 +492,11 @@ def expand_mask(
 
             test_mask = copy.deepcopy(mask)
             test_mask[i] = True
-            evals, coeffs = eigh(
-                F[test_mask, :][:, test_mask], S[test_mask, :][:, test_mask]
-            )
+            if RHF:
+                Fin = F[test_mask, :][:, test_mask]
+            else:
+                Fin = F[:, test_mask, :][:, :, test_mask]
+            evals, coeffs = eigh(Fin, S[test_mask, :][:, test_mask])
 
             criteria_input = [evals, nocc]
 
@@ -494,9 +520,11 @@ def expand_mask(
             test_smask[sidx] = submask
             test_mask = smask_to_mask(test_smask)
 
-            evals, coeffs = eigh(
-                F[test_mask, :][:, test_mask], S[test_mask, :][:, test_mask]
-            )
+            if RHF:
+                Fin = F[test_mask, :][:, test_mask]
+            else:
+                Fin = F[:, test_mask, :][:, :, test_mask]
+            evals, coeffs = eigh(Fin, S[test_mask, :][:, test_mask])
             if variant != 0:
                 subbasis_mol = create_shell_separated_mol(fullbasis_mol)
                 newmask = test_smask[:, 0].astype(bool)
@@ -544,19 +572,30 @@ def get_sub_scf_attributes(mol, fock, overlap):
         The SCF energy, sum of occupied orbital energies of the
         subbasis, the MO coefficient matrix of the subbasis.
     """
-    mf = mol.HF().apply(scf.addons.remove_linear_dep_)
+    RHF = (len(fock.shape) == 2)
+    if RHF:
+        mf = mol.HF().apply(scf.addons.remove_linear_dep_)
+    else:
+        mf = mol.UHF().apply(scf.addons.remove_linear_dep_)
 
     # Diagonalize fock matrix and form guess density matrix
-    if fock.shape[0] > 1:
+    if fock.shape[1] > 1:
         e, c = eigh(fock, overlap)
         occ = mf.get_occ(e, c)
-        dm = scf.hf.make_rdm1(c, occ)
+        dm = mf.make_rdm1(c, occ)
         mf.init_guess = dm
     mf.kernel()
 
     scf_energy = mf.e_tot
-    nocc_sb = len(mf.mo_occ > 0)
-    scf_orbital_energy = sum(np.sort(mf.mo_energy)[:nocc_sb])
+    if RHF:
+        nocc_sb = len(mf.mo_occ > 0)
+        scf_orbital_energy = sum(np.sort(mf.mo_energy)[:nocc_sb])
+    else:
+        nocc_sb = [len(mf.mo_occ[0] > 0), len(mf.mo_occ[1] > 0)]
+        scf_orbital_energy = sum(
+            np.sort(mf.mo_energy[0])[:nocc_sb[0]] +
+            np.sort(mf.mo_energy[1])[:nocc_sb[1]])
+        
     return scf_energy, scf_orbital_energy, mf.mo_coeff
 
 
@@ -602,10 +641,22 @@ def get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc):
     elif not mol_full.cart and not mol_sub.cart:
         ovlp = gto.intor_cross("int1e_ovlp_sph", mol_full, mol_sub)
     else:
-        raise RuntimeError("One of the mol objects is cartesian ans other spherical!")
-    Q = Cfull[:, :nocc].T @ ovlp @ Csub[:, :nocc]
+        raise RuntimeError("One of the mol objects is cartesian and other spherical!")
+    if len(np.asarray(nocc).shape) == 3:
+        raise RuntimeError("""You nocc has wrong shape!
+You might be using the unrestricted Hartree-Fock, which has not been implemented
+yet for this variant.""")
+    RHF = (len(np.asarray(nocc).shape) == 2)
+    if RHF:
+        Q = Cfull[:, :nocc].T @ ovlp @ Csub[:, :nocc]
+        return np.sum(np.sum(Q**2))
+    else:
+        Q = [
+            Cfull[0, :, :nocc[0]].T @ ovlp @ Csub[0, :, :nocc[0]],
+            Cfull[1, :, :nocc[1]].T @ ovlp @ Csub[1, :, :nocc[1]]
+        ]
+        return .5 * (np.sum(np.sum(Q[0]**2)) + np.sum(np.sum(Q[1]**2)))
 
-    return np.sum(np.sum(Q**2))
 
 
 def set_linked_shells(smask, val):
@@ -733,8 +784,12 @@ def find_subspace(
         subbasis_mol._bas = newbas
 
         fullbasis_coeffs = scf.mo_coeff
+        if RHF:
+            maskedConvF = convF[mask, :][:, mask]
+        else:
+            maskedConvF = convF[:, mask, :][:, :, mask]
         scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-            subbasis_mol, convF[mask, :][:, mask], S[mask, :][:, mask]
+            subbasis_mol, maskedConvF, S[mask, :][:, mask]
         )
         Q_sqrd = get_q_sqrd(
             fullbasis_coeffs, subbasis_coeffs, fullbasis_mol, subbasis_mol, nocc
@@ -778,9 +833,13 @@ def find_subspace(
         )
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
         if get_smask:
+            if RHF:
+                maskedConvF = convF[mask, :][:, mask]
+            else:
+                maskedConvF = convF[:, mask, :][:, :, mask]
             subbasis_mol._bas = fullbasis_mol._bas[[sm[0] for sm in smask]]
             scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                subbasis_mol, convF[mask, :][:, mask], S[mask, :][:, mask]
+                subbasis_mol, maskedConvF, S[mask, :][:, mask]
             )
 
         if collect_data:
