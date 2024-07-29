@@ -15,7 +15,8 @@ from time import time
 AVAIL_INIT_METHODS = [
     'scf',
     'atom',
-    'sap'
+    'sap',
+    'huckel'
 ]
 
 def get_files_in_folder(folder: str):
@@ -283,7 +284,7 @@ if __name__ == "__main__":
     bstemp = []
 
     if len(basis) == 1 and os.path.isfile(basis[0]):
-        f = open(basis)
+        f = open(basis[0])
         for line in f:
             bstemp.extend(line.strip("\n").split(" "))
     else:
