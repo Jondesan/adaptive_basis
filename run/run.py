@@ -13,7 +13,7 @@ import datetime
 from time import time
 
 AVAIL_INIT_METHODS = [
-    'scf',
+    'SCF',
     'atom',
     'sap',
     'huckel'
@@ -133,7 +133,7 @@ def run_abs(
         myhf = mol.HF().apply(scf.addons.remove_linear_dep_)
         
         if init_guess is None:
-            init_guess = ['minao']
+            init_guess = ['atom']
 
         if not os.path.isdir('output'):
             os.mkdir('output')
