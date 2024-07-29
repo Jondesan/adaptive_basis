@@ -39,7 +39,7 @@ def eigh(h, s, get_idx=False):
     c = x @ c
     idx = np.argsort(e)
     # e = np.sort(e)
-
+    
     if get_idx:
         return e[idx], c[idx], idx
     return e[idx], c[idx]
@@ -688,7 +688,11 @@ def find_subspace(
     convF = copy.deepcopy(F)
     F = scf.get_fock(dm=dm0)
     # mask or smask initialization
-    Fii = np.diag(F)
+    RHF = len(F.shape) == 2
+    if RHF:
+        Fii = np.diag(F)
+    else:
+        Fii = .5 * np.sum(np.diagonal(F, axis1=1, axis2=2), axis=0)
     mask = [False] * fullbasis_mol.nao_nr()
     min_idx = np.argmin(Fii)
     smask = None
@@ -703,7 +707,7 @@ def find_subspace(
         if link_shells:
             # If link_shells true, set same shells of same atoms
             # to True
-            set_linked_shells(smask, True)
+            smask = set_linked_shells(smask, True)
 
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
@@ -712,12 +716,13 @@ def find_subspace(
         fock = scf.get_fock(dm=dm0)  # = h1e + vhf, no DIIS
         s1e = scf.get_ovlp()
         mo_energy, mo_coeff = scf.eig(fock, s1e)
-        occ = scf.get_occ(mo_energy, mo_coeff)
         subbasis_coeffs = mo_coeff
     else:
-        occ = scf.get_occ()
         subbasis_coeffs = scf.mo_coeff
-    nocc = np.count_nonzero(occ)
+    if RHF:
+        nocc = mol.nelec[0]
+    else:
+        nocc = mol.nelec
     scf_energy = None
     scf_orbital_energy = None
     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
@@ -803,7 +808,6 @@ def find_subspace(
             print_data(
                 mask, current_criteria_val, difference, label, scf_energy, Q_sqrd
             )
-
         if abs(difference) < conv_tol or sum(mask) == len(mask):
             break
         previous_sum = current_criteria_val
