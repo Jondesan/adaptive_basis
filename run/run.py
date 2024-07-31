@@ -130,7 +130,7 @@ def run_abs(
             bsname = "basis_NA"
 
         # Set up Hartree-Fock, remove linear dependencies from basis
-        myhf = mol.UHF().apply(scf.addons.remove_linear_dep_)
+        myhf = mol.RHF().apply(scf.addons.remove_linear_dep_)
         myhf.eig = adb.eigh
 
         if init_guess is None:
@@ -164,24 +164,35 @@ def run_abs(
                     myhf.sap_basis = sapbs
                     dm0 = myhf.get_init_guess(key=ig)
                 end = time()
-
                 F = myhf.get_fock()
                 initF = myhf.get_fock(dm=dm0)
                 S = myhf.get_ovlp()
                 mo_energy, mo_coeff = adb.eigh(initF, S)
-                nocc = np.count_nonzero(myhf.get_occ(mo_energy, mo_coeff))
+                nocc = 2*mol.nelec[0] if len(F.shape)==2 else sum(mol.nelec)
                 f.write("time stats [s]\n")
                 f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
                 f.write(f"{end-start:15.9e}  ")
 
                 if variant == 0:
                     start = time()
-                    _, data_fbyf = adb.find_subspace(
+                    # _, data_fbyf = adb.find_subspace(
+                    #     F, S, mol, myhf,
+                    #     conv_tol=conv_tol,
+                    #     collect_data=True,
+                    #     variant=variant,
+                    #     dm0=dm0
+                    # )
+                    maskhistory = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
-                        collect_data=True,
+                        collect_data=False,
                         variant=variant,
-                        dm0=dm0
+                        dm0=dm0,
+                        return_mask_history=True
+                    )
+                    data_fbyf = adb.mask_analysis(
+                        maskhistory, mol, myhf,
+                        F, S
                     )
                     end = time()
 
@@ -191,14 +202,29 @@ def run_abs(
                     f.write("{:<15s}".format("-"))
 
                 start = time()
-                smask, data_sbys = adb.find_subspace(
+                # smask, data_sbys = adb.find_subspace(
+                #     F, S, mol, myhf,
+                #     conv_tol=conv_tol,
+                #     collect_data=True,
+                #     get_smask=True,
+                #     variant=variant,
+                #     link_shells=lshells,
+                #     dm0=dm0
+                # )
+                smaskhistory = adb.find_subspace(
                     F, S, mol, myhf,
                     conv_tol=conv_tol,
-                    collect_data=True,
+                    collect_data=False,
                     get_smask=True,
                     variant=variant,
                     link_shells=lshells,
-                    dm0=dm0
+                    dm0=dm0,
+                    return_mask_history=True
+                )
+                # smask = smaskhistory[-1][0]
+                data_sbys = adb.mask_analysis(
+                    smaskhistory, mol, myhf,
+                    F, S
                 )
                 end = time()
 

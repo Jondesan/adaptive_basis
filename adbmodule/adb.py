@@ -360,9 +360,9 @@ def get_iteration_criteria_value(variant, params):
                 criteria = np.sum(epsilon_i[:nocc[0]])
             else:
                 fullocc = sum(nocc)
-                criteria = np.sum(
-                    nocc[0] * epsilon_i[0,:nocc[0]] +
-                    nocc[1] * epsilon_i[1,:nocc[1]]) / fullocc
+                criteria  = np.sum(nocc[0] * epsilon_i[0,:nocc[0]])
+                criteria += np.sum(nocc[1] * epsilon_i[1,:nocc[1]]) 
+                criteria /= fullocc
         case 1:
             epsilon_i, nocc, hcore, Csub = params
             # criteria = 0.5 * np.sum(
@@ -471,7 +471,9 @@ def expand_mask(
         if RHF:
             last_sum = np.sum(evals[:nocc[0]])
         else:
-            last_sum = .5 * np.sum(evals[0,:nocc[0]] + evals[1,:nocc[1]])
+            last_sum = (
+                np.sum(evals[0,:nocc[0]]) / nocc[0] +
+                np.sum(evals[1,:nocc[1]]) / nocc[0] )
     else:
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
         newmask = [sm[0] for sm in smask]
@@ -573,7 +575,7 @@ def get_sub_scf_attributes(mol, fock, overlap):
     """
     RHF = (len(fock.shape) == 2)
     if RHF:
-        mf = mol.HF().apply(scf.addons.remove_linear_dep_)
+        mf = mol.RHF().apply(scf.addons.remove_linear_dep_)
     else:
         mf = mol.UHF().apply(scf.addons.remove_linear_dep_)
 
@@ -608,6 +610,12 @@ def create_shell_separated_mol(mol, verbose=0):
     return cmol
 
 
+def print_data_header():
+    print(
+            f'\n{"N_func":>10s}  {"Added ao/shell(s)":>18s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>15s}'
+        )
+
+
 def print_data(
     mask,
     criteria_value,
@@ -618,9 +626,7 @@ def print_data(
     print_header=False,
 ):
     if print_header:
-        print(
-            f'\n{"N_func":>10s}  {"Added ao/shell(s)":>18s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>15s}'
-        )
+        print_data_header()
 
     if E_scf is None:
         E_scf = "-"
@@ -641,18 +647,16 @@ def get_q_sqrd(Cfull, Csub, mol_full, mol_sub, nocc):
         ovlp = gto.intor_cross("int1e_ovlp_sph", mol_full, mol_sub)
     else:
         raise RuntimeError("One of the mol objects is cartesian and other spherical!")
-    RHF = (len(np.asarray(nocc)) == 1)
+    RHF = (len(Cfull.shape) == 2)
     if RHF:
         Q = Cfull[:, :nocc[0]].T @ ovlp @ Csub[:, :nocc[0]]
-        return np.sum(np.sum(Q**2))
+        return 2 * np.sum(np.sum(Q**2))
     else:
         Q = [
             Cfull[0, :, :nocc[0]].T @ ovlp @ Csub[0, :, :nocc[0]],
             Cfull[1, :, :nocc[1]].T @ ovlp @ Csub[1, :, :nocc[1]]
         ]
-        fullocc = sum(nocc)
-        return (nocc[0] * np.sum(np.sum(Q[0]**2)) +
-                nocc[1] * np.sum(np.sum(Q[1]**2))) / fullocc
+        return (np.sum(np.sum(Q[0]**2)) + np.sum(np.sum(Q[1]**2)))
 
 
 def set_linked_shells(smask, val):
@@ -704,7 +708,8 @@ def find_subspace(
     get_smask=False,
     variant=0,
     link_shells=True,
-    dm0=None
+    dm0=None,
+    return_mask_history=False
 ):
     """Looks for a Fock matrix subspace that approximately solves the
     Roothaan equation FC=SCE below a convergence of conv_tol.
@@ -724,12 +729,6 @@ def find_subspace(
         verbose : bool
             Determines whether some output will be printed during
             calculation.
-        collect_data : bool
-            If true, np.ndarray will be created and number of functions,
-             current_sum, difference, total SCF energy, SCF energy of
-             occupied orbitals and the projection onto the converged
-             full basis wave function will be appended on every
-             iteration.
         get_smask : bool
             Whether to return the shell mask and run iteration shell by
             shell instead of function by function. May provide faster
@@ -750,6 +749,9 @@ def find_subspace(
         dm0 : ndarray
             Initial guess density matrix. Can be used to test different
             intial guesses and their convergence with ABS method.
+        return_mask_history : bool
+            Whether to return the mask/smask at every iteration or only
+            the final converged one, default is False.
 
     Returns:
         1D boolean ndarray. A mask with selected function indices set to
@@ -758,7 +760,6 @@ def find_subspace(
         instead of function mask if get_smask is True.
     """
     fullbasis_mol = create_shell_separated_mol(mol)
-    convF = copy.deepcopy(F)
     F = scf.get_fock(dm=dm0)
     # mask or smask initialization
     RHF = len(F.shape) == 2
@@ -784,65 +785,22 @@ def find_subspace(
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
     previous_sum = np.sum(Fii[mask])
-    if dm0 is None and scf.dm:
-        subbasis_coeffs = scf.mo_coeff
+    if return_mask_history:
+        mask_history = [(
+            copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+            previous_sum,
+            0.0)]
     else:
-        fock = scf.get_fock(dm=dm0)  # = h1e + vhf, no DIIS
+        fock = scf.get_fock(dm=dm0)
         s1e = scf.get_ovlp()
         mo_energy, mo_coeff = scf.eig(fock, s1e)
-        subbasis_coeffs = mo_coeff
-    if RHF:
-        nocc = (mol.nelec[0],)
-    else:
-        nocc = mol.nelec
-    scf_energy = None
-    scf_orbital_energy = None
+    # if RHF:
+    #     nocc = (mol.nelec[0],)
+    # else:
+    nocc = mol.nelec
+    
     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
-    if collect_data:
-        if get_smask:
-            newmask = [sm[0] for sm in smask]
-            newbas = fullbasis_mol._bas[newmask]
-            subbasis_mol._bas = newbas
-
-            fullbasis_coeffs = scf.mo_coeff
-            maskedConvF = mask_matrix(convF, mask, RHF)
-            maskedS = mask_matrix(S, mask)
-            scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                subbasis_mol, maskedConvF, maskedS
-            )
-            Q_sqrd = get_q_sqrd(
-                fullbasis_coeffs, subbasis_coeffs, fullbasis_mol, subbasis_mol, nocc
-            )
-        else:
-            Q_sqrd = None
-
-        dataframe = [
-            [
-                sum(mask),
-                previous_sum,
-                0.0,
-                scf_energy,
-                scf_orbital_energy,
-                Q_sqrd,
-                copy.deepcopy(smask),
-            ]
-        ]
-
-        if verbose:
-            ao_labels = np.array(fullbasis_mol.ao_labels())[mask]
-            if get_smask:
-                num, symb = ao_labels[0].split()[:2]
-                label = "" if link_shells else f"{num} "
-                shllbl = re.findall(r'(\d+[a-zA-Z])', ao_labels[0].split()[2])[0]
-                label += f"{symb} {shllbl}"
-            else:
-                label = ao_labels[0].strip()
-            print_data(
-                mask, previous_sum, "-", label, scf_energy, Q_sqrd, print_header=True
-            )
-
-    last_mask = copy.deepcopy(mask)
     while True:
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
@@ -850,48 +808,121 @@ def find_subspace(
             subbasis_mol=subbasis_mol, Cfull=scf.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
         )
-        subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-        if collect_data:
-            if get_smask:
-                maskedConvF = mask_matrix(convF, mask, RHF)
-                maskedS = mask_matrix(S, mask)
-                subbasis_mol._bas = fullbasis_mol._bas[[sm[0] for sm in smask]]
-                scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                    subbasis_mol, maskedConvF, maskedS
-                )
-                Q_sqrd = get_q_sqrd(
-                    fullbasis_coeffs, subbasis_coeffs,
-                    fullbasis_mol, subbasis_mol, nocc
-                )
 
-            dataframe.append([
-                    sum(mask), current_criteria_val, difference,
-                    scf_energy, scf_orbital_energy, Q_sqrd,
-                    copy.deepcopy(smask)])
-            if verbose:
-                # Get most recent function/shell label
-                changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
-                ao_labels = np.array(fullbasis_mol.ao_labels())[changes]
-                if get_smask:
-                    num, symb = ao_labels[0].split()[:2]
-                    label = ""
-                    label += "" if link_shells else f"{num} "
-                    shllbl = re.findall(r'(\d+[a-zA-Z])', ao_labels[0].split()[2])[0]
-                    label += f"{symb} {shllbl}"
-                else:
-                    label = ao_labels[0].strip()
-                print_data(
-                    mask, current_criteria_val, difference, label, scf_energy, Q_sqrd
-                )
+        if return_mask_history:
+            mask_history.append( (
+                copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                current_criteria_val,
+                difference) )
+
+        subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
         if abs(difference) < conv_tol or sum(mask) == len(mask):
             break
         previous_sum = current_criteria_val
-        last_mask = copy.deepcopy(mask)
 
     if get_smask:
         mask = smask
+        
+    if return_mask_history:
+        mask = mask_history
 
-    if collect_data:
-        return mask, dataframe
     return mask
+
+
+def mask_analysis(
+    mask_history, mol, scf_obj,
+    fock, ovlp, verbose=True,
+    link_shells=True
+    ):
+    """Run mask analysis.
+
+    Args:
+        mask_history : array
+            The mask/smask history for which to run the analysis on. Elements
+            will be tuples, with i:th tuple being
+            (i:th mask/smask, i:th criteria value, i:th difference)
+        mol : pyscf.gto.MoleBase object
+            The molecule object
+        scf.obj : pyscf.scf.(U/R/RO/D/-)HF object
+            The self-consistent field object
+        fock : numpy.ndarray
+            The Fock matrix
+        ovlp : numpy.ndarray
+            The overlap matrix
+        verbose : bool
+            Whether to print data during analysis. Default is True.
+        link_shells : bool
+            Whether the shells of same atoms have been linked during ABS
+            calculation. Not strictly required even in the case of linked shell
+            ABS calculation, but will result in slightly inccorrect data prints.
+            Default is True.
+
+    Return:
+        dataframe : array
+            A python array with number of functions,
+            current_sum, difference, total SCF energy, SCF energy of
+            occupied orbitals and the projection onto the converged
+            full basis wave function will on every iteration.
+    """
+    fullbasis_mol = create_shell_separated_mol(mol)
+    RHF = len(fock.shape) == 2
+    # if RHF:
+    #     nocc = (fullbasis_mol.nelec[0],)
+    # else:
+    nocc = fullbasis_mol.nelec
+
+    dataframe = []
+    print_data_header()
+    last_mask = [False] * fullbasis_mol.nao_nr()
+    scf_energy = None
+    scf_orbital_energy = None
+    for mask_i, current_val, difference in mask_history:
+        is_smask = isinstance(mask_i[0], np.ndarray)
+        if is_smask:
+            smask = mask_i
+            subbasis_mol = create_shell_separated_mol(fullbasis_mol)
+            newmask = [sm[0] for sm in smask]
+            newbas = fullbasis_mol._bas[newmask]
+            subbasis_mol._bas = newbas
+
+            mask = smask_to_mask(smask, fullbasis_mol.cart)
+            fullbasis_coeffs = scf_obj.mo_coeff
+            maskedConvF = mask_matrix(fock, mask, RHF)
+            maskedS = mask_matrix(ovlp, mask)
+            scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
+                subbasis_mol, maskedConvF, maskedS
+            )
+            Q_sqrd = get_q_sqrd(
+                fullbasis_coeffs, subbasis_coeffs, fullbasis_mol, subbasis_mol, nocc
+            )
+        else:
+            mask = mask_i
+            Q_sqrd = None
+
+        if verbose:
+            changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
+            ao_labels = np.array(fullbasis_mol.ao_labels())[changes]
+            if is_smask:
+                num, symb = ao_labels[0].split()[:2]
+                label = ""
+                label += "" if link_shells else f"{num} "
+                shllbl = re.findall(r'(\d+[a-zA-Z])', ao_labels[0].split()[2])[0]
+                label += f"{symb} {shllbl}"
+            else:
+                label = ao_labels[0].strip()
+            print_data(
+                mask, current_val, difference, label, scf_energy, Q_sqrd,
+                print_header=False
+            )
+        dataframe.append([
+                sum(mask),
+                current_val,
+                difference,
+                scf_energy,
+                scf_orbital_energy,
+                Q_sqrd,
+                copy.deepcopy(smask if is_smask else mask),
+            ])
+        last_mask = copy.deepcopy(mask)
+    return dataframe
