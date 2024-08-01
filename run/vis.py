@@ -197,7 +197,7 @@ if __name__ == "__main__":
 
         for j,df in enumerate(datalist):
             current_panelidx = panelidx + (2 if 'unc' in df.basis_set else 0)
-            if df.variant == 0 and plotfbyf:
+            if df.variant == 'enocc' and plotfbyf:
                 axs[current_panelidx].semilogy(
                     df.fbfdat["nfunc"][1:],
                     -df.fbfdat["diff"][1:],
@@ -207,7 +207,7 @@ if __name__ == "__main__":
                 )
             # print(bset, df.sbsdat.columns)
             x, y = df.sbsdat["nfunc"][1:], df.sbsdat["E_scf"][1:] - df.ehf
-            if df.variant == 2:
+            if df.variant == 'elden':
                 y *= -1
             axs[current_panelidx].semilogy(
                 x, y,

@@ -262,7 +262,7 @@ def get_shells(mol):
 
 def maskidx_to_smaskidx(mask, smask, cart=False):
     """Create mapping between mask and smask"""
-    mapping = [0] * len(mask)  # mol.nao_nr()
+    mapping = [0] * len(mask)
     counter = 0
     for i, sm in enumerate(smask):
         angl = sm[2]
@@ -335,29 +335,48 @@ def mask_to_smask(mask, smask, cart=False):
     return smask
 
 
-def get_iteration_criteria_value(variant, params):
+def get_iteration_criteria_value(
+    variant,
+    epsilon_i=None,
+    nocc=None,
+    sub_hcore=None,
+    Csub=None,
+    Cfull=None,
+    ovlp=None
+    ):
     """Calculates the value of the chosen variants criteria.
 
     Args:
         variant : string
             Which variant to calculate.
-        params : list
-            The needed variables for calculating the different criteria.
-            enocc:
-                params[0] = energy eigenvalues,
-                params[1] = number of occupations
-            ecore: 
-                params[0] = energy eigenvalues,
-                params[1] = number of occupations,
-                params[2] = subbasis core hamiltonian hcore,
-                params[3] = subbasis coefficient matrix Csub
-            elden:
-                params[0] = coeff matrix fullbasis Cfull,
-                params[1] = coeff matrix subbasis Csub,
-                params[2] = fullbasis mol object,
-                params[3] = subbasis mol object,
-                params[4] = number of occupations
-
+        The needed variables for calculating the different criteria.
+        enocc:
+        epislon_i : ndarray
+            energy eigenvalues
+        nocc : tuple
+            number of occupations
+        ecore: 
+        evals : ndarray
+            energy eigenvalues
+        nocc : tuple
+            number of occupations
+        sub_hcore : 2D array
+            subbasis core hamiltonian hcore,
+        Csub : ndarray
+            subbasis coefficient matrix Csub
+        elden:
+        Cfull : ndarray
+            full basis coeff matrix
+        Csub : ndarray
+            subbasis coeff matrix
+        ovlp : 2D array
+            overlap matrix
+        nocc : tuple
+            number of occupations
+    
+    Returns:
+        criteria : float
+            Value of the criteria
     """
     criteria = 0.0
     if variant not in VARIANTS:
@@ -365,27 +384,20 @@ def get_iteration_criteria_value(variant, params):
             'The variant you are trying to use was not recognised!')
     match variant:
         case 'enocc':
-            epsilon_i, nocc = params
             RHF = (len(np.asarray(epsilon_i).shape) == 1)
             if RHF:
                 criteria = np.sum(epsilon_i[:nocc[0]])
             else:
-                fullocc = sum(nocc)
-                criteria  = np.sum(nocc[0] * epsilon_i[0,:nocc[0]])
-                criteria += np.sum(nocc[1] * epsilon_i[1,:nocc[1]]) 
-                criteria /= fullocc
+                criteria  = np.sum(epsilon_i[0,:nocc[0]])
+                criteria += np.sum(epsilon_i[1,:nocc[1]]) 
+            return criteria
         case 'ecore':
-            epsilon_i, nocc, hcore, Csub = params
-            occupations = [0]*Csub.shape[0]
-            occupations[:nocc] = [2]*nocc
-            occupations = np.array(occupations)
             mocc = Csub[:,:nocc]
             P = mocc @ mocc.conj().T
-            criteria = np.sum(P[:nocc,:nocc] @ (hcore + np.diag(epsilon_i))[:nocc,:nocc])
+            return np.sum(P[:nocc,:nocc] @ (sub_hcore + np.diag(epsilon_i))[:nocc,:nocc])
         case 'elden':
-            Cfull, Csub, ovlp, nocc = params
-            criteria = get_q_sqrd(Cfull, Csub, ovlp, nocc)
-    return criteria
+            return get_q_sqrd(Cfull, Csub, ovlp, nocc)
+
 
 def linked_shell_idx(smask):
     """ Return smask indices that correspond to duplicate shells, i.e.
@@ -422,7 +434,7 @@ def expand_mask(
     mask,
     smask=None,
     variant='enocc',
-    fullbasis_mol=None,
+    hcore=None,
     subbasis_mol=None,
     Cfull=None,
     link_shells=True,
@@ -469,33 +481,14 @@ def expand_mask(
     maskedS = mask_matrix(S, mask)
     evals, coeffs = eigh(maskedF, maskedS)
     last_sum = 0.0
-    hcore = scf.hf.get_hcore(fullbasis_mol)
+    if Cfull is None and variant == 'elden':
+        Cfull = eigh(F, S)
+    last_sum = get_iteration_criteria_value(
+        variant, epsilon_i=evals, nocc=nocc,
+        sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+        Cfull=Cfull, ovlp=S[:, mask])
 
-    # subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-    # newmask = [sm[0] for sm in smask]
-    # newbas = fullbasis_mol._bas[newmask]
-    # subbasis_mol._bas = newbas
-    match variant:
-        case 'enocc':
-            # if RHF:
-            #     last_sum = np.sum(evals[:nocc[0]])
-            # else:
-            #     last_sum = (
-            #         np.sum(evals[0,:nocc[0]]) / nocc[0] +
-            #         np.sum(evals[1,:nocc[1]]) / nocc[0] )
-            criteria_input = [
-                evals, nocc
-            ]
-        case 'ecore':
-            criteria_input = [
-                evals, nocc,
-                mask_matrix(hcore, mask), coeffs]
-        case 'elden':
-            _, Cfull = eigh(F, S)
-            criteria_input = [Cfull, coeffs, S[:,mask], nocc]
-    last_sum = get_iteration_criteria_value(variant, criteria_input)
-
-    test_sums = []
+    test_sums = []    
     if smask is None:
         for i, m in enumerate(mask):
             if m:
@@ -507,9 +500,11 @@ def expand_mask(
             maskedS = mask_matrix(S, test_mask)
             evals, coeffs = eigh(maskedF, maskedS)
 
-            criteria_input = [evals, nocc]
-
-            test_sums.append((i, get_iteration_criteria_value('enocc', criteria_input)))
+            test_sums.append(
+                (i, get_iteration_criteria_value(
+                        'enocc', epsilon_i=evals, nocc=nocc,
+                        sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+                        Cfull=Cfull, ovlp=S[:, test_mask])))
     else:
         # Gather indices of duplicate shells if link_shells enabled
         # (if system has more than 1 atom of same type,
@@ -532,25 +527,12 @@ def expand_mask(
             maskedF = mask_matrix(F, test_mask, RHF)
             maskedS = mask_matrix(S, test_mask)
             evals, coeffs = eigh(maskedF, maskedS)
-            # if variant != 0:
-            #     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-            #     newmask = test_smask[:, 0].astype(bool)
-            #     newbas = fullbasis_mol._bas[newmask]
-            #     subbasis_mol._bas = newbas
-            match variant:
-                case 'enocc':
-                    criteria_input = [evals, nocc]
-                case 'ecore':
-                    criteria_input = [
-                        evals,
-                        nocc,
-                        hcore[test_mask, :][:, test_mask],
-                        coeffs,
-                    ]
-                case 'elden':
-                    criteria_input = [Cfull, coeffs, S[:, test_mask], nocc]
-
-            test_sums.append((i, get_iteration_criteria_value(variant, criteria_input)))
+            
+            test_sums.append(
+                (i, get_iteration_criteria_value(
+                        variant, epsilon_i=evals, nocc=nocc,
+                        sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+                        Cfull=Cfull, ovlp=S[:, test_mask])))
 
     test_differences = [test_sum[1] - last_sum for test_sum in test_sums]
     if variant == 2:
@@ -618,7 +600,7 @@ def create_shell_separated_mol(mol, verbose=0):
 
 def print_data_header():
     print(
-            f'\n{"N_func":>10s}  {"Added ao/shell(s)":>18s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>15s}'
+            f'\n{"N_func":>10s}  {"Added ao/shell(s)":>18s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
         )
 
 
@@ -642,7 +624,7 @@ def print_data(
     print(f"{sum(mask):10}  {ao_or_shell_label:>18}  {criteria_value:15.9f}", end="")
     print(f'  {diff:{">15s" if isinstance(diff, str) else "15.9f"}}', end="")
     print(f'  {E_scf:{">15s" if isinstance(E_scf, str) else "15.9f"}}', end="")
-    print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "15.9f"}}')
+    print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "18.12f"}}')
 
 
 def get_q_sqrd(Cfull, Csub, ovlp, nocc):
@@ -650,7 +632,7 @@ def get_q_sqrd(Cfull, Csub, ovlp, nocc):
     RHF = (len(Cfull.shape) == 2)
     if RHF:
         Q = Cfull[:, :nocc[0]].T @ ovlp @ Csub[:, :nocc[0]]
-        return 2 * np.sum(np.sum(Q**2))
+        return 2.0 * np.sum(np.sum(Q**2))
     else:
         Q = [
             Cfull[0, :, :nocc[0]].T @ ovlp @ Csub[0, :, :nocc[0]],
@@ -771,6 +753,7 @@ def find_subspace(
     min_idx = np.argmin(Fii)
     smask = None
     mask[min_idx] = True
+    nocc = mol.nelec
 
     if not scf.converged:
         warn('SCF has not converged!\n')
@@ -784,24 +767,27 @@ def find_subspace(
 
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
-    previous_sum = np.sum(Fii[mask])
+    sub_hcore = Cfull = Csub = None
+    if variant == 'ecore':
+        sub_hcore = scf.hf.get_hcore(mol)[min_idx, min_idx]
+    if variant == 'elden':
+        _, Cfull = eigh(F, S)
+        _, Csub = eigh(mask_matrix(F, mask, RHF=RHF), mask_matrix(S, mask))
+    previous_sum = get_iteration_criteria_value(
+        variant, epsilon_i=Fii, nocc=nocc, sub_hcore=sub_hcore,
+        Csub=Csub, Cfull=Cfull, ovlp=S[:, mask])
     if return_mask_history:
         mask_history = [(
             copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
             previous_sum,
             0.0)]
-    else:
-        fock = scf.get_fock(dm=dm0)
-        s1e = scf.get_ovlp()
-        mo_energy, mo_coeff = scf.eig(fock, s1e)
-    nocc = mol.nelec
     
     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
     while True:
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
-            fullbasis_mol=fullbasis_mol,
+            hcore=scf.get_hcore(),
             subbasis_mol=subbasis_mol, Cfull=scf.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
         )
@@ -864,9 +850,6 @@ def mask_analysis(
     """
     fullbasis_mol = create_shell_separated_mol(mol)
     RHF = len(fock.shape) == 2
-    # if RHF:
-    #     nocc = (fullbasis_mol.nelec[0],)
-    # else:
     nocc = fullbasis_mol.nelec
 
     dataframe = []
