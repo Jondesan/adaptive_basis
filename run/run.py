@@ -130,7 +130,7 @@ def run_abs(
             bsname = "basis_NA"
 
         # Set up Hartree-Fock, remove linear dependencies from basis
-        myhf = mol.UHF().apply(scf.addons.remove_linear_dep_)
+        myhf = mol.HF().apply(scf.addons.remove_linear_dep_)
         myhf.eig = adb.eigh
 
         if init_guess is None:
