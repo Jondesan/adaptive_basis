@@ -16,7 +16,8 @@ AVAIL_INIT_METHODS = [
     'SCF',
     'atom',
     'sap',
-    'huckel'
+    'huckel',
+    'vsap'
 ]
 
 def get_files_in_folder(folder: str):
@@ -160,6 +161,9 @@ def run_abs(
                 myhf.kernel()
                 if ig == 'SCF':
                     dm0 = None
+                elif ig == 'vsap':
+                    tempmf = mol.KS().set(xc='b3lyp')
+                    dm0 = tempmf.get_init_guess(key='vsap')
                 else:
                     myhf.sap_basis = sapbs
                     dm0 = myhf.get_init_guess(key=ig)
@@ -175,13 +179,6 @@ def run_abs(
 
                 if variant == 'enocc':
                     start = time()
-                    # _, data_fbyf = adb.find_subspace(
-                    #     F, S, mol, myhf,
-                    #     conv_tol=conv_tol,
-                    #     collect_data=True,
-                    #     variant=variant,
-                    #     dm0=dm0
-                    # )
                     maskhistory = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
@@ -202,15 +199,6 @@ def run_abs(
                     f.write("{:<15s}".format("-"))
 
                 start = time()
-                # smask, data_sbys = adb.find_subspace(
-                #     F, S, mol, myhf,
-                #     conv_tol=conv_tol,
-                #     collect_data=True,
-                #     get_smask=True,
-                #     variant=variant,
-                #     link_shells=lshells,
-                #     dm0=dm0
-                # )
                 smaskhistory = adb.find_subspace(
                     F, S, mol, myhf,
                     conv_tol=conv_tol,
@@ -230,7 +218,7 @@ def run_abs(
 
                 f.write(f"{end-start:15.9e}\n\n")
 
-                if variant == 0:
+                if variant == 'enocc':
                     df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
                 df_sbys = pd.DataFrame(data_sbys, columns=datacols)
 
@@ -241,7 +229,7 @@ def run_abs(
                     )
                 )
 
-                if variant == 0:
+                if variant == 'enocc':
                     f.write("function-by-function iteration\n")
                     df_fbyf.to_csv(f, index=False)
                     f.write("\n\n")
