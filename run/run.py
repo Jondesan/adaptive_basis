@@ -90,7 +90,7 @@ def add_initial_guesses(ig_list, mol_list):
 
 def run_abs(
     mol_list,
-    variant=0,
+    variant='enocc',
     lshells=True,
     conv_tol=1e-4,
     sapbs='sapgraspsmall'):
@@ -130,7 +130,7 @@ def run_abs(
             bsname = "basis_NA"
 
         # Set up Hartree-Fock, remove linear dependencies from basis
-        myhf = mol.RHF().apply(scf.addons.remove_linear_dep_)
+        myhf = mol.UHF().apply(scf.addons.remove_linear_dep_)
         myhf.eig = adb.eigh
 
         if init_guess is None:
@@ -150,7 +150,7 @@ def run_abs(
                 if ig == 'sap':
                     f.write(" {:<15s}".format("sap_basis"))
                 f.write("\n")
-                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15d} {ig:<15s}")
+                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15s} {ig:<15s}")
                 if ig == 'sap':
                     f.write(f" {sapbasisname:<15s}")
                 f.write("\n")
@@ -173,7 +173,7 @@ def run_abs(
                 f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
                 f.write(f"{end-start:15.9e}  ")
 
-                if variant == 0:
+                if variant == 'enocc':
                     start = time()
                     # _, data_fbyf = adb.find_subspace(
                     #     F, S, mol, myhf,
@@ -196,7 +196,7 @@ def run_abs(
                     )
                     end = time()
 
-                if variant == 0:
+                if variant == 'enocc':
                     f.write(f"{end-start:15.9e}  ")
                 else:
                     f.write("{:<15s}".format("-"))
@@ -284,11 +284,11 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--var",
-        type=int,
+        type=str,
         required=False,
-        default=0,
-        choices=[0, 1, 2],
-        help="which minimisation criteria to use, optional. Default is 0",
+        default='enocc',
+        choices=['enocc', 'elden'],
+        help="which minimisation criteria to use, optional. Default is enocc.",
     )
     parser.add_argument(
         "--linkshells",
