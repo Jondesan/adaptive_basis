@@ -21,16 +21,16 @@ ls = [
 
 lw = 2.0
 
-ylabels = [
-    r"$E_{\rm{subscf}} - E_{\rm{fullscf}}$ [hartree]",
-    r"$\Delta \frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii})$",
-    r"$\Delta Q$",
-]
-legend_labels = [
-    r"shl by shl: $\Delta E_{orb}$",#=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
-    r"shl by shl: $\Delta (\frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii}))_{n-1, n}$",
-    r"shl by shl: $\Delta Q_{n-1, n}$",#=Q_{n}-Q_{n-1}$",
-]
+ylabels = {
+    'enocc': r"$E_{\rm{subscf}} - E_{\rm{fullscf}}$ [hartree]",
+    'ecore': r"$\Delta \frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii})$",
+    'elden': r"$\Delta Q$",
+}
+legend_labels = {
+    'enocc': r"shl by shl: $\Delta E_{orb}$",#=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
+    'ecore': r"shl by shl: $\Delta (\frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii}))_{n-1, n}$",
+    'elden': r"shl by shl: $\Delta Q_{n-1, n}$",#=Q_{n}-Q_{n-1}$",
+}
 
 
 class MolData:
@@ -77,7 +77,7 @@ def read_data(path: str):
             dat.name, dat.basis_set, dat.variant, dat.init_guess = baseinfo[:4]
             if len(baseinfo) == 5:
                 dat.sapbasisname = baseinfo[-1]
-            dat.variant = int(dat.variant)
+            dat.variant = str(dat.variant)
         if i == 6:
             dat.thf, dat.tfbf, dat.tsbs = list(
                 map(lambda x: (float(x) if x != "-" else x), line.strip().split())
