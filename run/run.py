@@ -146,12 +146,14 @@ def run_abs(
                 fname = ".".join([molname, bsname, ig])
             else:
                 fname = ".".join([molname, bsname, ig, sapbasisname])
+            if not lshells:
+                fname = ".".join([fname, 'unlinked'])
             with open(f'output/{fname}.out', "w") as f:
-                f.write("{:<15s} {:<15s} {:<15s} {:<15s}".format("molecule", "basis_set", "variant", "init_guess"))
+                f.write("{:<15s} {:<15s} {:<15s} {:<15s} {:<15s}".format("molecule", "basis_set", "variant", "init_guess", "link_status"))
                 if ig == 'sap':
                     f.write(" {:<15s}".format("sap_basis"))
                 f.write("\n")
-                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15s} {ig:<15s}")
+                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15s} {ig:<15s} {str(lshells):<15s}")
                 if ig == 'sap':
                     f.write(f" {sapbasisname:<15s}")
                 f.write("\n")
@@ -322,4 +324,7 @@ if __name__ == "__main__":
     # print(mols)
     run_abs(
         mols,
-        variant=variant, lshells=lshells, conv_tol=conv_tol, sapbs=sapbasis)
+        variant=variant,
+        lshells=lshells,
+        conv_tol=conv_tol,
+        sapbs=sapbasis)
