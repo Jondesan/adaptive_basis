@@ -39,6 +39,7 @@ class MolData:
     variant = None
     init_guess = ""
     sapbasisname = None
+    link_status = True
     thf = 0.0
     tfbf = 0.0
     tsbs = 0.0
@@ -71,12 +72,17 @@ def read_data(path: str):
     sbs_end = 0
 
     f = open(path)
+    avail_params = []
     for i, line in enumerate(f):
+        if i == 0:
+            avail_params = line.strip().split()
         if i == 1:
             baseinfo = line.strip().split()
             dat.name, dat.basis_set, dat.variant, dat.init_guess = baseinfo[:4]
-            if len(baseinfo) == 5:
-                dat.sapbasisname = baseinfo[-1]
+            if 'sap_basis' in avail_params:
+                dat.sapbasisname = baseinfo[avail_params.index('sap_basis')]
+            if 'link_status' in avail_params:
+                dat.link_status = baseinfo[avail_params.index('link_status')]
             dat.variant = str(dat.variant)
         if i == 6:
             dat.thf, dat.tfbf, dat.tsbs = list(
