@@ -56,14 +56,18 @@ def get_molecules_in_dir(
             ):
                 fnparts = fn.split('/')[-1].split('.')
                 if len(fnparts) > 2:
-                    charge = int(fnparts[1])
+                    charge = [int(substring[-1]) for substring in fnparts if 'charge' in substring]
+                    charge = charge[0] if len(charge) != 0 else 0
+                    spin = [int(substring[-1]) for substring in fnparts if 'spin' in substring]
+                    spin = spin[0] if len(spin) != 0 else None
                 else:
                     charge = 0
+                    spin = None
                 mol = gto.M(
                     atom=fn,
                     basis=unc + bs,
                     charge=charge,
-                    spin=None,
+                    spin=spin,
                     verbose=4,
                 )
                 smask = adb.init_smask(mol)
@@ -131,7 +135,10 @@ def run_abs(
             bsname = "basis_NA"
 
         # Set up Hartree-Fock, remove linear dependencies from basis
-        myhf = mol.HF().apply(scf.addons.remove_linear_dep_)
+        if mol.spin == 0:
+            myhf = mol.RHF().apply(scf.addons.remove_linear_dep_)
+        else:
+            myhf = mol.UHF().apply(scf.addons.remove_linear_dep_)
         myhf.eig = adb.eigh
 
         if init_guess is None:
@@ -321,7 +328,6 @@ if __name__ == "__main__":
             init_guesses,
             mol[4]
         )
-    # print(mols)
     run_abs(
         mols,
         variant=variant,

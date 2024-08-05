@@ -26,7 +26,7 @@ VARIANTS = [
 def eigh(h, s):
     """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
     """
-    if len(h.shape) == 3:
+    if len(np.asarray(h).shape) == 3:
         ea, ca = canonical_orth(h[0], s, get_idx=False)
         eb, cb = canonical_orth(h[1], s, get_idx=False)
         return np.asarray([ea, eb]), np.asarray([ca, cb])
@@ -850,6 +850,7 @@ def mask_analysis(
     """
     fullbasis_mol = create_shell_separated_mol(mol)
     RHF = len(fock.shape) == 2
+    print('RHF:', RHF)
     nocc = fullbasis_mol.nelec
 
     dataframe = []
