@@ -879,7 +879,11 @@ def mask_analysis(
             )
         else:
             mask = mask_i
-            Q_sqrd = None
+            e, subbasis_coeffs = eigh(mask_matrix(fock, mask, RHF=RHF), mask_matrix(ovlp, mask))
+            Q_sqrd = get_q_sqrd(
+                fullbasis_coeffs, subbasis_coeffs,
+                ovlp[:,mask], nocc
+            )
 
         if verbose:
             changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
