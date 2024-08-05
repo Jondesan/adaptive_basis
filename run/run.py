@@ -98,7 +98,7 @@ def run_abs(
     variant='enocc',
     lshells=True,
     conv_tol=1e-4,
-    sapbs='sapgraspsmall'):
+    sap_basis_sets='sapgraspsmall'):
     """Run subbasis iteration for molecules in mol_list"""
 
     """
@@ -148,104 +148,109 @@ def run_abs(
             os.mkdir('output')
 
         for ig in init_guess:
-            sapbasisname = sapbs.strip().split('/')[-1].split('.')[0]
-            if ig != 'sap':
-                fname = ".".join([molname, bsname, ig])
+            if ig == 'sap':
+                sapbases = np.asarray(sap_basis_sets)
             else:
-                fname = ".".join([molname, bsname, ig, sapbasisname])
-            if not lshells:
-                fname = ".".join([fname, 'unlinked'])
-            with open(f'output/{fname}.out', "w") as f:
-                f.write("{:<15s} {:<15s} {:<15s} {:<15s} {:<15s}".format("molecule", "basis_set", "variant", "init_guess", "link_status"))
-                if ig == 'sap':
-                    f.write(" {:<15s}".format("sap_basis"))
-                f.write("\n")
-                f.write(f"{molname:<15s} {bsname:<15s} {variant:<15s} {ig:<15s} {str(lshells):<15s}")
-                if ig == 'sap':
-                    f.write(f" {sapbasisname:<15s}")
-                f.write("\n")
-                f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
+                sapbases = [None]
 
-                start = time()
-                myhf.kernel()
-                if ig == 'SCF':
-                    dm0 = None
-                elif ig == 'vsap':
-                    tempmf = mol.KS().set(xc='b3lyp')
-                    dm0 = tempmf.get_init_guess(key='vsap')
+            for sapbs in sapbases:
+                if ig == 'sap':
+                    sapbasisname = sapbs.strip().split('/')[-1].split('.')[0]
+                    fname = ".".join([molname, bsname, ig, sapbasisname])
                 else:
-                    myhf.sap_basis = sapbs
-                    dm0 = myhf.get_init_guess(key=ig)
-                end = time()
-                F = myhf.get_fock()
-                initF = myhf.get_fock(dm=dm0)
-                S = myhf.get_ovlp()
-                mo_energy, mo_coeff = adb.eigh(initF, S)
-                nocc = 2*mol.nelec[0] if len(F.shape)==2 else sum(mol.nelec)
-                f.write("time stats [s]\n")
-                f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
-                f.write(f"{end-start:15.9e}  ")
+                    fname = ".".join([molname, bsname, ig])
+                if not lshells:
+                    fname = ".".join([fname, 'unlinked'])
+                with open(f'output/{fname}.out', "w") as f:
+                    f.write("{:<15s} {:<15s} {:<15s} {:<15s} {:<15s}".format("molecule", "basis_set", "variant", "init_guess", "link_status"))
+                    if ig == 'sap':
+                        f.write(" {:<15s}".format("sap_basis"))
+                    f.write("\n")
+                    f.write(f"{molname:<15s} {bsname:<15s} {variant:<15s} {ig:<15s} {str(lshells):<15s}")
+                    if ig == 'sap':
+                        f.write(f" {sapbasisname:<15s}")
+                    f.write("\n")
+                    f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
-                if variant == 'enocc':
                     start = time()
-                    maskhistory = adb.find_subspace(
+                    myhf.kernel()
+                    if ig == 'SCF':
+                        dm0 = None
+                    elif ig == 'vsap':
+                        tempmf = mol.KS().set(xc='b3lyp')
+                        dm0 = tempmf.get_init_guess(key='vsap')
+                    else:
+                        myhf.sap_basis = sapbs
+                        dm0 = myhf.get_init_guess(key=ig)
+                    end = time()
+                    F = myhf.get_fock()
+                    initF = myhf.get_fock(dm=dm0)
+                    S = myhf.get_ovlp()
+                    mo_energy, mo_coeff = adb.eigh(initF, S)
+                    nocc = 2*mol.nelec[0] if len(F.shape)==2 else sum(mol.nelec)
+                    f.write("time stats [s]\n")
+                    f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
+                    f.write(f"{end-start:15.9e}  ")
+
+                    if variant == 'enocc':
+                        start = time()
+                        maskhistory = adb.find_subspace(
+                            F, S, mol, myhf,
+                            conv_tol=conv_tol,
+                            collect_data=False,
+                            variant=variant,
+                            dm0=dm0,
+                            return_mask_history=True
+                        )
+                        data_fbyf = adb.mask_analysis(
+                            maskhistory, mol, myhf,
+                            F, S
+                        )
+                        end = time()
+
+                    if variant == 'enocc':
+                        f.write(f"{end-start:15.9e}  ")
+                    else:
+                        f.write("{:<15s}".format("-"))
+
+                    start = time()
+                    smaskhistory = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
                         collect_data=False,
+                        get_smask=True,
                         variant=variant,
+                        link_shells=lshells,
                         dm0=dm0,
                         return_mask_history=True
                     )
-                    data_fbyf = adb.mask_analysis(
-                        maskhistory, mol, myhf,
+                    data_sbys = adb.mask_analysis(
+                        smaskhistory, mol, myhf,
                         F, S
                     )
                     end = time()
 
-                if variant == 'enocc':
-                    f.write(f"{end-start:15.9e}  ")
-                else:
-                    f.write("{:<15s}".format("-"))
+                    f.write(f"{end-start:15.9e}\n\n")
 
-                start = time()
-                smaskhistory = adb.find_subspace(
-                    F, S, mol, myhf,
-                    conv_tol=conv_tol,
-                    collect_data=False,
-                    get_smask=True,
-                    variant=variant,
-                    link_shells=lshells,
-                    dm0=dm0,
-                    return_mask_history=True
-                )
-                # smask = smaskhistory[-1][0]
-                data_sbys = adb.mask_analysis(
-                    smaskhistory, mol, myhf,
-                    F, S
-                )
-                end = time()
+                    if variant == 'enocc':
+                        df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
+                    df_sbys = pd.DataFrame(data_sbys, columns=datacols)
 
-                f.write(f"{end-start:15.9e}\n\n")
-
-                if variant == 'enocc':
-                    df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
-                df_sbys = pd.DataFrame(data_sbys, columns=datacols)
-
-                f.write("{:<15s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
-                f.write(
-                    "{:<15d} {:<15f} {:<15d}\n\n".format(
-                        nocc, myhf.e_tot, mol.nao_nr()
+                    f.write("{:<15s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
+                    f.write(
+                        "{:<15d} {:<15f} {:<15d}\n\n".format(
+                            nocc, myhf.e_tot, mol.nao_nr()
+                        )
                     )
-                )
 
-                if variant == 'enocc':
-                    f.write("function-by-function iteration\n")
-                    df_fbyf.to_csv(f, index=False)
+                    if variant == 'enocc':
+                        f.write("function-by-function iteration\n")
+                        df_fbyf.to_csv(f, index=False)
+                        f.write("\n\n")
+
+                    f.write("shell-by-shell iteration\n")
+                    df_sbys.to_csv(f, index=False)
                     f.write("\n\n")
-
-                f.write("shell-by-shell iteration\n")
-                df_sbys.to_csv(f, index=False)
-                f.write("\n\n")
 
 
 
@@ -270,7 +275,8 @@ if __name__ == "__main__":
         help="which initialization methods to use, 'all' will select all available methods"
     )
     parser.add_argument(
-        "--sapbasis", type=str, required=False, default='sapgraspsmall',
+        "--sapbasis", type=str, required=False, nargs='+',
+        default='sapgraspsmall',
         help="SAP basis, either path to file or basis name"
     )
     parser.add_argument(
@@ -333,4 +339,4 @@ if __name__ == "__main__":
         variant=variant,
         lshells=lshells,
         conv_tol=conv_tol,
-        sapbs=sapbasis)
+        sap_basis_sets=sapbasis)
