@@ -97,7 +97,7 @@ def extract_basis(smask, shellsep_mol):
     current_id = -1
     # Collect unique atom smasks (if same atom is present in the shellsep_mol
     # more than once, ignore its mask after the first one)
-    for elem in copy.deepcopy(smask[smask[:, 0]]):
+    for elem in copy.deepcopy(smask[np.asarray(smask[:, 0], dtype=bool)]):
         if elem[3][1] not in found_atoms:
             found_atoms.append(elem[3][1])
             current_id = elem[3][0]
@@ -106,13 +106,12 @@ def extract_basis(smask, shellsep_mol):
         duplicate_removed_smask.append(elem)
 
     duplicate_removed_smask = np.array(duplicate_removed_smask)
-
     # Initialize distinct atoms' dictionary formatted basis structures
     # with angular momentum l
     for angl, shl in duplicate_removed_smask[:, [2, 3]]:
         if basis[shl[1]] is None:
             basis[shl[1]] = []
-        elif angl not in [x[0] for x in basis[shl[1]]]:
+        if angl not in [x[0] for x in basis[shl[1]]]:
             basis[shl[1]].append([angl])
 
     # Append exponents and contraction coefficients
@@ -124,8 +123,16 @@ def extract_basis(smask, shellsep_mol):
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
             idxs = [idx[3][2] - idx[2] for idx in key_smask if idx[2] == i]
-            shell.extend(np.array(ogbas[i][1:])[:, [0] + idxs].tolist())
-
+            coeff_table = np.asarray(ogbas[i][1:], dtype=float)[:, [0] + idxs]
+            # Remove rows and columns with all 0 contraction coeffs
+            filtered_shell = coeff_table[
+                ~((coeff_table[:, 0] != 0) &
+                (coeff_table[:, 1:] == 0).all(axis=1))]
+            filtered_shell = filtered_shell[~np.all(filtered_shell == 0, axis=1)]
+            if not filtered_shell.tolist():
+                basis[key].pop(i)
+            else:
+                shell.extend(filtered_shell.tolist())
     return basis
 
 
@@ -482,7 +489,7 @@ def expand_mask(
     evals, coeffs = eigh(maskedF, maskedS)
     last_sum = 0.0
     if Cfull is None and variant == 'elden':
-        Cfull = eigh(F, S)
+        _, Cfull = eigh(F, S)
     last_sum = get_iteration_criteria_value(
         variant, epsilon_i=evals, nocc=nocc,
         sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
@@ -688,7 +695,7 @@ def find_subspace(
     verbose=True,
     collect_data=False,
     get_smask=False,
-    variant=0,
+    variant='enocc',
     link_shells=True,
     dm0=None,
     return_mask_history=False
@@ -754,9 +761,6 @@ def find_subspace(
     smask = None
     mask[min_idx] = True
     nocc = mol.nelec
-
-    if not scf.converged:
-        warn('SCF has not converged!\n')
 
     if get_smask:
         smask = init_smask(fullbasis_mol, fullbasis_mol.cart)
@@ -850,7 +854,6 @@ def mask_analysis(
     """
     fullbasis_mol = create_shell_separated_mol(mol)
     RHF = len(fock.shape) == 2
-    print('RHF:', RHF)
     nocc = fullbasis_mol.nelec
 
     dataframe = []
@@ -874,7 +877,7 @@ def mask_analysis(
             scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
                 subbasis_mol, maskedConvF, maskedS
             )
-            Q_sqrd = get_q_sqrd(
+            Q_sqrd= get_q_sqrd(
                 fullbasis_coeffs, subbasis_coeffs,
                 ovlp[:,mask], nocc
             )
