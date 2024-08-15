@@ -27,9 +27,9 @@ ylabels = {
     'elden': r"$\Delta Q$",
 }
 legend_labels = {
-    'enocc': r"shl by shl: $\Delta E_{orb}$",#=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
-    'ecore': r"shl by shl: $\Delta (\frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii}))_{n-1, n}$",
-    'elden': r"shl by shl: $\Delta Q_{n-1, n}$",#=Q_{n}-Q_{n-1}$",
+    'enocc': r"$\Delta E_{orb}$",#=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
+    'ecore': r"$\Delta (\frac{1}{2}\sum_i^{occ}(\epsilon_i + h_{ii}))_{n-1, n}$",
+    'elden': r"$\Delta Q_{n-1, n}$",#=Q_{n}-Q_{n-1}$",
 }
 
 
@@ -217,8 +217,7 @@ if __name__ == "__main__":
                 y *= -1
             axs[current_panelidx].semilogy(
                 x, y,
-                label=legend_labels[df.variant] + 
-                (f', init_guess: {df.init_guess}' if df.init_guess != 'SCF' else f', {df.init_guess}'), c=colors[j], ls=ls[ j % numpanels ], marker='o', lw=lw
+                label= ( f'{df.init_guess}' + (f', basis: {df.sapbasisname}' if df.init_guess == 'sap' else '') ), c=colors[j], ls=ls[ j % numpanels ], marker='o', lw=lw
                 )
 
             # Projection panels
@@ -255,56 +254,5 @@ if __name__ == "__main__":
     for ax in axs:
         ax.legend(fontsize=12)
         ax.grid(alpha=.5)
-
-    # for i in range(len(axs)):
-    #     for j in range(ndat):
-    #         if dat[j].variant == 0:
-    #             axs[i].semilogy(
-    #                 dat[j].fbfdat["nfunc"][1:],
-    #                 -dat[j].fbfdat["diff"][1:],
-    #                 ".-",
-    #                 label=r"fct by fct: $\Delta E_{orb}=\sum E^{occ orb}_{n+1}-\sum E^{occ orb}_{n}$",
-    #             )
-    #         x, y = dat[j].sbsdat["nfunc"][1:], -dat[j].sbsdat["diff"][1:]
-    #         if dat[j].variant == 2:
-    #             y *= -1
-    #         axs[i].semilogy(x, y, ".-", label=legend_labels[dat[i].variant])
-    #         axs[i].semilogy(
-    #             dat[j].sbsdat["nfunc"],
-    #             dat[j].sbsdat["E_scf"] - dat[j].ehf,
-    #             ".-",
-    #             label=r"$\Delta E^{scf}=E^{scf}_{subbasis}-E^{scf}_{full basis}$",
-    #         )
-
-    #         # Projection panels
-    #         axs[-1].semilogy(
-    #             dat[j].sbsdat["nfunc"],
-    #             1 - dat[j].sbsdat["Qsqrd"] / dat[j].nocc,
-    #             ".-",
-    #             label=r"$\Delta Q_\sigma$, " + f"{dat[j].basis_set}, nfunc: {dat[j].nfunc}",
-    #         )
-        
-    #     axs[i].set_title(
-    #         f"${{{dat[i].name}}}$\nBasis: {dat[i].basis_set}, nfunc: {dat[i].nfunc}",
-    #         fontsize=24,
-    #         fontweight="bold",
-    #     )
-    #     axs[i].set_ylabel(ylabels[dat[i].variant], fontsize=16)
-    #     axs[i].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
-
-
-    # for i in range(len(axs)):
-    #     axs[i].grid(alpha=0.5)
-    #     axs[i].legend()
-    # axs[-1].set_title(
-    #     f"${{{dat[0].name}}}$\nBasis: {dat[0].basis_set}, nfunc: {dat[0].nfunc}",
-    #     fontsize=24,
-    #     fontweight="bold",
-    # )
-    # axs[-1].set_ylabel(
-    #     r"$\Delta Q_\sigma = 1 - \frac{1}{N_{occ}}\sum_{i,j}^{N_{occ}}|<i^{subbasis}|j^{full basis}>|^2$",
-    #     fontsize=16,
-    # )
-    # axs[-1].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
 
     plt.show()
