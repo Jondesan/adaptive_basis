@@ -698,7 +698,8 @@ def find_subspace(
     variant='enocc',
     link_shells=True,
     dm0=None,
-    return_mask_history=False
+    return_mask_history=False,
+    mask_cutoff=None
 ):
     """Looks for a Fock matrix subspace that approximately solves the
     Roothaan equation FC=SCE below a convergence of conv_tol.
@@ -722,15 +723,15 @@ def find_subspace(
             Whether to return the shell mask and run iteration shell by
             shell instead of function by function. May provide faster
             convergence but can also provide more functions overall.
-        variant : int
+        variant : str
             Which variant to use. Specifies what will be the
             minimisation criteria for adding a function/shell.
-            0: $\sum_{i}^{nocc}\epsilon_i$,
+            enocc: $\sum_{i}^{nocc}\epsilon_i$,
                where $epsilon_i$ are the occupied diagonal Fock matrx
                elements
-            1: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
+            ecore: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
                where $h_{ii}=C_i^\dagger H_{core}C_i$
-            2: $\Delta Q$,
+            elden: $\Delta Q$,
                which is $1-\frac{1}{nocc}\sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
         link_shells : bool
             Whether to link shells of atoms of same type in the mask.
@@ -741,6 +742,10 @@ def find_subspace(
         return_mask_history : bool
             Whether to return the mask/smask at every iteration or only
             the final converged one, default is False.
+        mask_cutoff : float
+            The ratio of toggled functions to all functions after which
+            subspace is considered converged. If None, conv_tol will be used,
+            if supplied conv_tol will be ignored.
 
     Returns:
         1D boolean ndarray. A mask with selected function indices set to
@@ -804,7 +809,12 @@ def find_subspace(
 
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
-        if abs(difference) < conv_tol or sum(mask) == len(mask):
+        if  mask_cutoff is None and \
+            abs(difference) < conv_tol or \
+            sum(mask) == len(mask):
+            break
+        elif mask_cutoff is not None and \
+             np.count_nonzero(mask)/len(mask) >= mask_cutoff:
             break
         previous_sum = current_criteria_val
 
