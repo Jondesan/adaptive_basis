@@ -303,7 +303,7 @@ if __name__ == '__main__':
     t_find_subspace = end - start
 
     start = time()
-    mf.scf_conv, mf.e_tot, mf.mo_energy, mf.mo_coeff, mf.mo_occ = kernel(mf, dm0=dm0)
+    mf.scf_conv, mf.e_tot, mf.mo_energy, mf.mo_coeff, mf.mo_occ = kernel(mf)
     end = time()
     t_fullHF = end - start
     Efull = mf.e_tot
