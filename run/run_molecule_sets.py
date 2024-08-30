@@ -57,6 +57,12 @@ if __name__ == '__main__':
         "--id", type=str, required=True,
         help="identifying string to add to molecule directory to separate data from different runs"
     )
+    parser.add_argument(
+        "--soscf",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="whether to run second order SCF, optional",
+    )
 
     
     args = parser.parse_args()
@@ -69,6 +75,7 @@ if __name__ == '__main__':
     outpath = args.out
     info = args.info
     id = args.id
+    SOSCF = args.soscf
 
     if cutoff is not None and (cutoff < 0.0 or cutoff > 1.0):
         raise argparse.ArgumentTypeError('Value of cutoff has to be between 0 and 1')
@@ -131,7 +138,21 @@ if __name__ == '__main__':
         t_find_subspace = end - start
 
         start = time()
-        mf.kernel(dm0=dm0)
+        # mf.kernel(dm0=dm0)
+        # mf.mol.verbose = 4
+        if SOSCF:
+            # guess Fock
+            F = mf.get_fock(dm = dm0)
+            # build orbitals
+            guess_orbE, guess_orbs = mf.eig(F, S)
+            guess_occs = mf.get_occ(guess_orbE, guess_orbs)
+            # initialize mf orbs
+            mf.mo_coeff = guess_orbs
+            mf.mo_energy = guess_orbE
+            mf = mf.newton()
+            mf.kernel()
+        else:
+            mf.kernel()
         end = time()
     t_fullHF = end - start
     Efull = mf.e_tot
@@ -162,7 +183,7 @@ if __name__ == '__main__':
             dm0[i][idx] = subdm[j]
 
         start = time()
-        if True:
+        if SOSCF:
             # guess Fock
             F = mf.get_fock(dm = dm0)
             # build orbitals
