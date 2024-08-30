@@ -1,4 +1,4 @@
-"""Adaptive basis method"""
+"""Adaptive basis set method"""
 
 # import pyscf
 import numpy as np
