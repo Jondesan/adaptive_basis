@@ -14,6 +14,7 @@ from pyscf import lib
 from pyscf import gto
 from pyscf import scf
 from warnings import warn
+from operator import itemgetter
 import copy
 import re
 
@@ -22,6 +23,12 @@ VARIANTS = [
     #'ecore', # Energy sum of orbitals and core H
     'elden', # Electron density
 ]
+NFUNCS = {
+    'S': 1,
+    'P': 3,
+    'D': 5,
+    'F': 7,
+}
 
 def eigh(h, s):
     """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
@@ -508,10 +515,12 @@ def expand_mask(
             evals, coeffs = eigh(maskedF, maskedS)
 
             test_sums.append(
-                (i, get_iteration_criteria_value(
-                        'enocc', epsilon_i=evals, nocc=nocc,
-                        sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-                        Cfull=Cfull, ovlp=S[:, test_mask])))
+                (i,
+                get_iteration_criteria_value(
+                    'enocc', epsilon_i=evals, nocc=nocc,
+                    sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+                    Cfull=Cfull, ovlp=S[:, test_mask]),
+                1))
     else:
         # Gather indices of duplicate shells if link_shells enabled
         # (if system has more than 1 atom of same type,
@@ -535,14 +544,17 @@ def expand_mask(
             maskedS = mask_matrix(S, test_mask)
             evals, coeffs = eigh(maskedF, maskedS)
             
+            func_keys = [shell[3] for shell in submask[:,3]]
+            nfuncs = np.sum(itemgetter(*func_keys)(NFUNCS))
             test_sums.append(
-                (i, get_iteration_criteria_value(
-                        variant, epsilon_i=evals, nocc=nocc,
-                        sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-                        Cfull=Cfull, ovlp=S[:, test_mask])))
-
-    test_differences = [test_sum[1] - last_sum for test_sum in test_sums]
-    if variant == 2:
+                (i,
+                get_iteration_criteria_value(
+                    variant, epsilon_i=evals, nocc=nocc,
+                    sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+                    Cfull=Cfull, ovlp=S[:, test_mask]),
+                nfuncs))
+    test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]
+    if variant == 'elden':
         array_index = np.argmax(test_differences)
     else:
         array_index = np.argmin(test_differences)

@@ -309,6 +309,7 @@ if __name__ == "__main__":
     lshells = args.linkshells
     conv_tol = args.convtol
     sapbasis = args.sapbasis
+    sapbasis = [sapbasis] if isinstance(sapbasis, str) else sapbasis
     init_guesses = args.init_guesses
     bs = []
     bstemp = []
