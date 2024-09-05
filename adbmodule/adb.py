@@ -456,6 +456,7 @@ def expand_mask(
     subbasis_mol=None,
     Cfull=None,
     link_shells=True,
+    nfunc_normalisation=True,
 ):
     """Expands the current mask by either one function or one shell
     based on smask.
@@ -486,8 +487,12 @@ def expand_mask(
             elden: $\Delta Q$,
                which is $1-\frac{1}{nocc}\sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
         link_shells : bool
-            Whether to link shells of atoms of same type in the mask.
-            Default is True.
+            Whether to link shells of atoms of same type in the mask
+            Optional, default is True
+        nfunc_normalisation : bool
+            Whether to normalise the criteria with the number of added
+            functions.
+            Optional, deault is True
 
     Returns:
         The new mask (boolean ndarray), the current difference in
@@ -557,7 +562,10 @@ def expand_mask(
                     sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
                     Cfull=Cfull, ovlp=S[:, test_mask]),
                 nfuncs))
-    test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]
+    if nfunc_normalisation:
+        test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]
+    else:
+        test_differences = [(test_sum[1] - last_sum) for test_sum in test_sums]
     if variant == 'elden':
         array_index = np.argmax(test_differences)
     else:
@@ -713,6 +721,7 @@ def find_subspace(
     get_smask=False,
     variant='enocc',
     link_shells=True,
+    nfunc_normalisation=True,
     dm0=None,
     return_mask_history=False,
     mask_cutoff=None
@@ -752,6 +761,10 @@ def find_subspace(
         link_shells : bool
             Whether to link shells of atoms of same type in the mask.
             Default is True.
+        nfunc_normalisation : bool
+            Whether to normalise the criteria with the number of added
+            functions.
+            Optional, deault is True
         dm0 : ndarray
             Initial guess density matrix. Can be used to test different
             intial guesses and their convergence with ABS method.
@@ -815,6 +828,7 @@ def find_subspace(
             hcore=scf.get_hcore(),
             subbasis_mol=subbasis_mol, Cfull=scf.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
+            nfunc_normalisation=nfunc_normalisation,
         )
 
         if return_mask_history:

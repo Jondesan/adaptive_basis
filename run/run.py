@@ -98,7 +98,8 @@ def run_abs(
     variant='enocc',
     lshells=True,
     conv_tol=1e-4,
-    sap_basis_sets='sapgraspsmall'):
+    sap_basis_sets='sapgraspsmall',
+    nfunc_normalisation=True):
     """Run subbasis iteration for molecules in mol_list"""
 
     """
@@ -200,7 +201,8 @@ def run_abs(
                             collect_data=False,
                             variant=variant,
                             dm0=dm0,
-                            return_mask_history=True
+                            return_mask_history=True,
+                            nfunc_normalisation=nfunc_normalisation
                         )
                         data_fbyf = adb.mask_analysis(
                             maskhistory, mol, myhf,
@@ -221,6 +223,7 @@ def run_abs(
                         get_smask=True,
                         variant=variant,
                         link_shells=lshells,
+                        nfunc_normalisation=nfunc_normalisation,
                         dm0=dm0,
                         return_mask_history=True
                     )
@@ -299,6 +302,12 @@ if __name__ == "__main__":
         default=True,
         help="Turn duplicate shell linking on/off during shell by shell calculations.",
     )
+    parser.add_argument(
+        "--nfunc_normalisation",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Normalise criteria value w.r.t. the number of added functions, optional. Default is True.",
+    )
 
     args = parser.parse_args()
 
@@ -309,6 +318,7 @@ if __name__ == "__main__":
     lshells = args.linkshells
     conv_tol = args.convtol
     sapbasis = args.sapbasis
+    nfunc_norm = args.nfunc_normalisation
     sapbasis = [sapbasis] if isinstance(sapbasis, str) else sapbasis
     init_guesses = args.init_guesses
     bs = []
@@ -340,4 +350,5 @@ if __name__ == "__main__":
         variant=variant,
         lshells=lshells,
         conv_tol=conv_tol,
-        sap_basis_sets=sapbasis)
+        sap_basis_sets=sapbasis,
+        nfunc_normalisation=nfunc_norm)
