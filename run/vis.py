@@ -150,6 +150,8 @@ if __name__ == "__main__":
     bsets = args.bs    
     handle_decontraction = args.unc
     plotfbyf = args.plotfbyf
+    
+    conv_tol = 1e-1
 
     files = os.listdir(datadir)
     files_to_process = list(filter(lambda f: mol == f.split('.')[0], files))
@@ -201,6 +203,7 @@ if __name__ == "__main__":
         datalist = list(filter(lambda data: bset in data.basis_set, dat))
         colors = cm.managua(np.linspace(.2, .8, len(datalist)))
 
+        convergences = []
         for j,df in enumerate(datalist):
             current_panelidx = panelidx + (2 if 'unc' in df.basis_set else 0)
             if df.variant == 'enocc' and plotfbyf:
@@ -219,6 +222,9 @@ if __name__ == "__main__":
                 x, y,
                 label= ( f'{df.init_guess}' + (f', basis: {df.sapbasisname}' if df.init_guess == 'sap' else '') ), c=colors[j], ls=ls[ j % numpanels ], marker='o', lw=lw
                 )
+            # Get index where convergence criteria is met and store
+            conv_idx = np.argwhere(y <= conv_tol)[0]
+            convergences.append(x[conv_idx].values[0])
 
             # Projection panels
             axs[panelidx + 1].semilogy(
@@ -249,7 +255,15 @@ if __name__ == "__main__":
             )
             axs[panelidx + 1].set_xlabel("Subbasis size N", fontsize=16, fontweight="bold")
 
+        ymin, ymax = axs[current_panelidx].get_ylim()
+        conv_line_x = np.max(convergences)
+        axs[current_panelidx].vlines(
+            conv_line_x, ymin, ymax,
+            linestyle='--', color='red',
+            label=f'Convergence {conv_tol}: {conv_line_x} funcs')
+        axs[current_panelidx].set_ylim(ymin, ymax)
         panelidx += numpanels
+
 
     for ax in axs:
         ax.legend(fontsize=12)
