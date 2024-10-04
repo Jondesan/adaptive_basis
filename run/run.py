@@ -270,7 +270,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "-c", "--convtol", type=float, required=False, default=1e-4,
-        help="path to basis input file"
+        help="convergence tolerance"
     )
     parser.add_argument(
         "--init_guesses", type=str, required=False, nargs='+',
