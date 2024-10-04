@@ -56,9 +56,9 @@ def get_molecules_in_dir(
             ):
                 fnparts = fn.split('/')[-1].split('.')
                 if len(fnparts) > 2:
-                    charge = [int(substring[-1]) for substring in fnparts if 'charge' in substring]
+                    charge = [int(substring.replace('charge', '')) for substring in fnparts if 'charge' in substring]
                     charge = charge[0] if len(charge) != 0 else 0
-                    spin = [int(substring[-1]) for substring in fnparts if 'spin' in substring]
+                    spin = [int(substring.replace('spin','')) for substring in fnparts if 'spin' in substring]
                     spin = spin[0] if len(spin) != 0 else None
                 else:
                     charge = 0
