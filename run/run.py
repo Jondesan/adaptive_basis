@@ -132,6 +132,8 @@ def run_abs(
         # Open the output file
         bsname = mol.basis
         molname = molfilename.split(".")[0]
+        charge = mol.charge
+        spin = mol.spin
         if len(bsname) > 25:
             bsname = "basis_NA"
 
@@ -163,7 +165,8 @@ def run_abs(
                 if not lshells:
                     fname = ".".join([fname, 'unlinked'])
                 with open(f'output/{fname}.out', "w") as f:
-                    f.write("{:<15s} {:<15s} {:<15s} {:<15s} {:<15s}".format("molecule", "basis_set", "variant", "init_guess", "link_status"))
+                    f.write("{:<15s} {:<15s} {:<15s} {:<15s} {:<15s}".format(
+                        "molecule", "basis_set", "variant", "init_guess", "link_status"))
                     if ig == 'sap':
                         f.write(" {:<15s}".format("sap_basis"))
                     f.write("\n")
@@ -171,6 +174,8 @@ def run_abs(
                     if ig == 'sap':
                         f.write(f" {sapbasisname:<15s}")
                     f.write("\n")
+                    f.write("{:<15s} {:<15s}\n".format('charge', 'spin'))
+                    f.write(f"{charge:<15d} {spin:<15d}\n")
                     f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
                     start = time()
