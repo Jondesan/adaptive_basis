@@ -279,7 +279,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--init_guesses", type=str, required=False, nargs='+',
-        default='all', choices=['all', 'scf', 'sap', 'atom'],
+        default='all', choices=['all', 'scf', 'sap', 'atom', 'vsap', 'huckel'],
         help="which initialization methods to use, 'all' will select all available methods"
     )
     parser.add_argument(
