@@ -68,11 +68,12 @@ def get_molecules_in_dir(
                     basis=unc + bs,
                     charge=charge,
                     spin=spin,
-                    verbose=4,
+                    verbose=0,
                 )
+                mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
                 smask = adb.init_smask(mol)
                 molecules.append(
-                    [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None]
+                    [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None, bs]
                 )
 
     # Sort by number of electrons, then by the basis, then by number of basis fcts
@@ -99,7 +100,11 @@ def run_abs(
     lshells=True,
     conv_tol=1e-4,
     sap_basis_sets='sapgraspsmall',
-    nfunc_normalisation=True):
+    nfunc_normalisation=True,
+    dft=False,
+    xc='b3lyp',
+    grid_level=3
+    ):
     """Run subbasis iteration for molecules in mol_list"""
 
     """
@@ -128,9 +133,9 @@ def run_abs(
     """
     datacols = ["nfunc", "cursum", "diff", "E_scf", "E_orb", "Qsqrd", "smask"]
 
-    for molfilename, mol, uncmol, shells, init_guess in mol_list:
+    for molfilename, mol, uncmol, shells, init_guess, basisname in mol_list:
         # Open the output file
-        bsname = mol.basis
+        bsname = basisname#mol.basis
         molname = molfilename.split(".")[0]
         charge = mol.charge
         spin = mol.spin
@@ -244,9 +249,9 @@ def run_abs(
                         df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
                     df_sbys = pd.DataFrame(data_sbys, columns=datacols)
 
-                    f.write("{:<15s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
+                    f.write("{:<15s} {:<30s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
                     f.write(
-                        "{:<15d} {:<15f} {:<15d}\n\n".format(
+                        "{:<15d} {:<30.20f} {:<15d}\n\n".format(
                             nocc, myhf.e_tot, mol.nao_nr()
                         )
                     )
@@ -313,6 +318,12 @@ if __name__ == "__main__":
         default=True,
         help="Normalise criteria value w.r.t. the number of added functions, optional. Default is True.",
     )
+    parser.add_argument(
+        "--dft",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Whether to use DFT, optional. Default is False.",
+    )
 
     args = parser.parse_args()
 
@@ -326,6 +337,7 @@ if __name__ == "__main__":
     nfunc_norm = args.nfunc_normalisation
     sapbasis = [sapbasis] if isinstance(sapbasis, str) else sapbasis
     init_guesses = args.init_guesses
+    dft = args.dft
     bs = []
     bstemp = []
 
@@ -343,17 +355,18 @@ if __name__ == "__main__":
         else:
             bs.append(b)
     mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec)
+    print(mols)
     if 'all' in init_guesses:
         init_guesses = AVAIL_INIT_METHODS
     for mol in mols:
-        mol[4] = add_initial_guesses(
-            init_guesses,
-            mol[4]
-        )
+        mol[4] = add_initial_guesses(init_guesses, mol[4])
+    
     run_abs(
         mols,
         variant=variant,
         lshells=lshells,
         conv_tol=conv_tol,
         sap_basis_sets=sapbasis,
-        nfunc_normalisation=nfunc_norm)
+        nfunc_normalisation=nfunc_norm,
+        dft=dft
+        )

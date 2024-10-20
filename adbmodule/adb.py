@@ -457,6 +457,9 @@ def expand_mask(
     Cfull=None,
     link_shells=True,
     nfunc_normalisation=True,
+    dft=False,
+    xc='b3lyp',
+    grid_level=3,
 ):
     """Expands the current mask by either one function or one shell
     based on smask.
@@ -493,6 +496,15 @@ def expand_mask(
             Whether to normalise the criteria with the number of added
             functions.
             Optional, deault is True
+        dft : bool
+            Hartree-Fock or DFT.
+            Optional, default is False
+        xc : str
+            XC functional string accepted by PySCF.
+            Optional, default is 'b3lyp'.
+        grid_level : int
+            predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
+            Optional, default is 3.
 
     Returns:
         The new mask (boolean ndarray), the current difference in
@@ -581,12 +593,28 @@ def expand_mask(
     return mask, test_differences[array_index], test_sums[array_index][1], smask
 
 
-def get_sub_scf_attributes(mol, fock, overlap):
+def get_sub_scf_attributes(
+    mol,
+    fock,
+    overlap,
+    dft=False,
+    xc='b3lyp',
+    grid_level=3
+    ):
     """Calculates converged attributes for the system.
 
     Args:
         mol : pyscf.gto.MoleBase
             The molecule object
+        dft : bool
+            Hartree-Fock or DFT.
+            Optional, default is False
+        xc : str
+            XC functional string accepted by PySCF.
+            Optional, default is 'b3lyp'.
+        grid_level : int
+            predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
+            Optional, default is 3.
 
     Returns:
         The SCF energy, sum of occupied orbital energies of the
@@ -597,6 +625,9 @@ def get_sub_scf_attributes(mol, fock, overlap):
         mf = mol.RHF().apply(scf.addons.remove_linear_dep_)
     else:
         mf = mol.UHF().apply(scf.addons.remove_linear_dep_)
+    if dft:
+        mf.to_ks(xc=xc)
+        mf.grid.level = grid_level
 
     # Diagonalize fock matrix and form guess density matrix
     if fock.shape[1] > 1:
@@ -723,6 +754,9 @@ def find_subspace(
     link_shells=True,
     nfunc_normalisation=True,
     dm0=None,
+    dft=False,
+    xc='b3lyp',
+    grid_level=3,
     return_mask_history=False,
     mask_cutoff=None
 ):
@@ -768,6 +802,15 @@ def find_subspace(
         dm0 : ndarray
             Initial guess density matrix. Can be used to test different
             intial guesses and their convergence with ABS method.
+        dft : bool
+            Hartree-Fock or DFT.
+            Optional, default is False
+        xc : str
+            XC functional string accepted by PySCF.
+            Optional, default is 'b3lyp'.
+        grid_level : int
+            predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
+            Optional, default is 3.
         return_mask_history : bool
             Whether to return the mask/smask at every iteration or only
             the final converged one, default is False.
@@ -783,6 +826,9 @@ def find_subspace(
         instead of function mask if get_smask is True.
     """
     fullbasis_mol = create_shell_separated_mol(mol)
+    if dft:
+        scf.to_ks()
+        scf.grid.level = grid_level
     F = scf.get_fock(dm=dm0)
     # mask or smask initialization
     RHF = len(F.shape) == 2
@@ -829,6 +875,7 @@ def find_subspace(
             subbasis_mol=subbasis_mol, Cfull=scf.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
             nfunc_normalisation=nfunc_normalisation,
+            dft=dft, xc=xc, grid_level=grid_level
         )
 
         if return_mask_history:
@@ -860,7 +907,10 @@ def find_subspace(
 def mask_analysis(
     mask_history, mol, scf_obj,
     fock, ovlp, verbose=True,
-    link_shells=True
+    link_shells=True,
+    dft=False,
+    xc='b3lyp',
+    grid_level=3,
     ):
     """Run mask analysis.
 
@@ -871,7 +921,7 @@ def mask_analysis(
             (i:th mask/smask, i:th criteria value, i:th difference)
         mol : pyscf.gto.MoleBase object
             The molecule object
-        scf.obj : pyscf.scf.(U/R/RO/D/-)HF object
+        scf_obj : pyscf.scf.(U/R/RO/D/-)HF object
             The self-consistent field object
         fock : numpy.ndarray
             The Fock matrix
@@ -884,6 +934,15 @@ def mask_analysis(
             calculation. Not strictly required even in the case of linked shell
             ABS calculation, but will result in slightly inccorrect data prints.
             Default is True.
+        dft : bool
+            Hartree-Fock or DFT.
+            Optional, default is False
+        xc : str
+            XC functional string accepted by PySCF.
+            Optional, default is 'b3lyp'.
+        grid_level : int
+            predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
+            Optional, default is 3.
 
     Return:
         dataframe : array
@@ -915,7 +974,8 @@ def mask_analysis(
             maskedConvF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
             scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                subbasis_mol, maskedConvF, maskedS
+                subbasis_mol, maskedConvF, maskedS,
+                dft=dft, xc=xc, grid_level=grid_level
             )
             Q_sqrd= get_q_sqrd(
                 fullbasis_coeffs, subbasis_coeffs,
