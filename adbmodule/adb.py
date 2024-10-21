@@ -622,12 +622,14 @@ def get_sub_scf_attributes(
     """
     RHF = (len(fock.shape) == 2)
     if RHF:
-        mf = mol.RHF().apply(scf.addons.remove_linear_dep_)
+        mf = mol.RHF()
     else:
-        mf = mol.UHF().apply(scf.addons.remove_linear_dep_)
+        mf = mol.UHF()
+    mf = mf.apply(scf.addons.remove_linear_dep_)
     if dft:
-        mf.to_ks(xc=xc)
-        mf.grid.level = grid_level
+        mf = mf.to_ks(xc=xc)
+        mf.grid.level = grid_level # FIXME
+        mf.grid.prune = None
 
     # Diagonalize fock matrix and form guess density matrix
     if fock.shape[1] > 1:
