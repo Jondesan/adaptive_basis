@@ -142,12 +142,6 @@ def run_abs(
         if len(bsname) > 25:
             bsname = "basis_NA"
 
-        # Set up Hartree-Fock, remove linear dependencies from basis
-        if mol.spin == 0:
-            myhf = mol.RHF().apply(scf.addons.remove_linear_dep_)
-        else:
-            myhf = mol.UHF().apply(scf.addons.remove_linear_dep_)
-        myhf.eig = adb.eigh
 
         if init_guess is None:
             init_guess = ['atom']
@@ -156,6 +150,13 @@ def run_abs(
             os.mkdir('output')
 
         for ig in init_guess:
+            # Set up Hartree-Fock, remove linear dependencies from basis
+            if mol.spin == 0:
+                myhf = mol.RHF()
+            else:
+                myhf = mol.UHF().apply(scf.addons.remove_linear_dep_)
+            myhf = myhf.apply(scf.addons.remove_linear_dep_)
+            myhf.eig = adb.eigh
             if ig == 'sap':
                 sapbases = np.asarray(sap_basis_sets)
             else:
