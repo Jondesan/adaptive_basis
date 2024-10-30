@@ -154,9 +154,9 @@ def run_abs(
             if mol.spin == 0:
                 myhf = mol.RHF()
             else:
-                myhf = mol.UHF().apply(scf.addons.remove_linear_dep_)
+                myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
             myhf = myhf.apply(scf.addons.remove_linear_dep_)
-            myhf.eig = adb.eigh
+            # myhf.eig = adb.eigh
             if ig == 'sap':
                 sapbases = np.asarray(sap_basis_sets)
             else:
