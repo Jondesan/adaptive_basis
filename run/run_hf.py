@@ -16,7 +16,7 @@ if __name__ == '__main__':
     mols = args.mols
 
     basis_sets = ['aug-pc-1', 'aug-pc-2', 'aug-pc-3', 'aug-pc-4']
-    with open('hf_energies.out') as outfile:
+    with open('hf_energies.out', 'a') as outfile:
         for molpath in mols:
             for bs in basis_sets:
                 for unc in ['', 'unc-']:
