@@ -4,7 +4,6 @@ import sys
 import os
 import argparse
 
-sys.path.append("../adbmodule/")
 import adb
 from pyscf import scf, gto
 import numpy as np
@@ -149,14 +148,20 @@ def run_abs(
         if not os.path.isdir('output'):
             os.mkdir('output')
 
+        # Set up Hartree-Fock, remove linear dependencies from basis
+        if mol.spin == 0:
+            myhf = mol.RHF()
+        else:
+            myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
+        myhf = myhf.apply(scf.addons.remove_linear_dep_)
+        myhf.eig = adb.eigh
+
+        start = time()
+        myhf.kernel()
+        end = time()
+        fullbasis_hf_time = end - start
+
         for ig in init_guess:
-            # Set up Hartree-Fock, remove linear dependencies from basis
-            if mol.spin == 0:
-                myhf = mol.RHF()
-            else:
-                myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
-            myhf = myhf.apply(scf.addons.remove_linear_dep_)
-            # myhf.eig = adb.eigh
             if ig == 'sap':
                 sapbases = np.asarray(sap_basis_sets)
             else:
@@ -185,7 +190,6 @@ def run_abs(
                     f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
                     start = time()
-                    myhf.kernel()
                     if ig == 'SCF':
                         dm0 = None
                     elif ig == 'vsap':
@@ -202,7 +206,7 @@ def run_abs(
                     nocc = 2*mol.nelec[0] if len(F.shape)==2 else sum(mol.nelec)
                     f.write("time stats [s]\n")
                     f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
-                    f.write(f"{end-start:15.9e}  ")
+                    f.write(f"{(fullbasis_hf_time + end - start):15.9e}  ")
 
                     if variant == 'enocc':
                         start = time()
