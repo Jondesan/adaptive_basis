@@ -37,6 +37,7 @@ NFUNCS = {
 def eigh(h, s):
     """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
     """
+    # print(np.asarray(h).shape)
     if len(np.asarray(h).shape) == 3:
         ea, ca = canonical_orth(h[0], s, get_idx=False)
         eb, cb = canonical_orth(h[1], s, get_idx=False)
@@ -61,13 +62,14 @@ def canonical_orth(h, s, get_idx=False):
         Sorted eigenvalues (ascending) and coefficients, if get_idx is
         True the indices that sort the eigenvalues are also returned
     """
+    print(s.shape)
     x = canonical_orth_(s, 1e-8)
+    print(x.shape)
     xhx = x.conj().T @ h @ x
     e, c = np.linalg.eigh(xhx)
     c = x @ c
     idx = np.argsort(e)
     # e = np.sort(e)
-    
     if get_idx:
         return e[idx], c[idx], idx
     return e[idx], c[idx]
