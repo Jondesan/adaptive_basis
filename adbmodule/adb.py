@@ -62,9 +62,9 @@ def canonical_orth(h, s, get_idx=False):
         Sorted eigenvalues (ascending) and coefficients, if get_idx is
         True the indices that sort the eigenvalues are also returned
     """
-    print(s.shape)
+    # print(s.shape)
     x = canonical_orth_(s, 1e-8)
-    print(x.shape)
+    # print(x.shape)
     xhx = x.conj().T @ h @ x
     e, c = np.linalg.eigh(xhx)
     c = x @ c
@@ -749,7 +749,7 @@ def find_subspace(
     F,
     S,
     mol,
-    scf,
+    scf_obj,
     conv_tol=1e-2,
     verbose=True,
     collect_data=False,
@@ -774,7 +774,7 @@ def find_subspace(
             The overlap matrix.
         mol : MoleBase
             The MoleBase molecule object
-        scf : SCF
+        scf_obj : SCF
             The converged SCF object corresponding to mol
         conv_tol : float
             Convergence criteria used to determine when to stop the
@@ -829,11 +829,14 @@ def find_subspace(
         data as described in Args section. Shell mask is returned
         instead of function mask if get_smask is True.
     """
+    print(scf_obj._opt)
+    scf_obj_copy = scf_obj.copy()
+    print(scf_obj_copy._opt)
     fullbasis_mol = create_shell_separated_mol(mol)
     if dft:
-        scf.to_ks()
-        scf.grid.level = grid_level
-    F = scf.get_fock(dm=dm0)
+        scf_obj_copy.to_ks()
+        scf_obj_copy.grid.level = grid_level
+    F = scf_obj_copy.get_fock(dm=dm0)
     # mask or smask initialization
     RHF = len(F.shape) == 2
     if RHF:
@@ -857,7 +860,7 @@ def find_subspace(
 
     sub_hcore = Cfull = Csub = None
     if variant == 'ecore':
-        sub_hcore = scf.hf.get_hcore(mol)[min_idx, min_idx]
+        sub_hcore = scf_obj_copy.hf.get_hcore(mol)[min_idx, min_idx]
     if variant == 'elden':
         _, Cfull = eigh(F, S)
         _, Csub = eigh(mask_matrix(F, mask, RHF=RHF), mask_matrix(S, mask))
@@ -875,8 +878,8 @@ def find_subspace(
     while True:
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
-            hcore=scf.get_hcore(),
-            subbasis_mol=subbasis_mol, Cfull=scf.mo_coeff,
+            hcore=scf_obj_copy.get_hcore(),
+            subbasis_mol=subbasis_mol, Cfull=scf_obj_copy.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
             nfunc_normalisation=nfunc_normalisation,
             dft=dft, xc=xc, grid_level=grid_level
@@ -955,6 +958,7 @@ def mask_analysis(
             occupied orbitals and the projection onto the converged
             full basis wave function will on every iteration.
     """
+    scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
     RHF = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
@@ -964,7 +968,7 @@ def mask_analysis(
     last_mask = [False] * fullbasis_mol.nao_nr()
     scf_energy = None
     scf_orbital_energy = None
-    fullbasis_coeffs = scf_obj.mo_coeff
+    fullbasis_coeffs = scf_obj_copy.mo_coeff
     for mask_i, current_val, difference in mask_history:
         is_smask = isinstance(mask_i[0], np.ndarray)
         if is_smask:
