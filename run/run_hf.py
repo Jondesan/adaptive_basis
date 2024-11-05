@@ -20,7 +20,19 @@ if __name__ == '__main__':
     for molpath in mols:
         for bs in basis_sets:
             for unc in ['', 'unc-']:
-                mol = pyscf.M(atom=molpath, basis=unc + bs, verbose=0)
+                fnparts = molpath.split('/')[-1].split('.')
+                if len(fnparts) > 2:
+                    charge = [int(substring.replace('charge', '')) for substring in fnparts if 'charge' in substring]
+                    charge = charge[0] if len(charge) != 0 else 0
+                    spin = [int(substring.replace('spin','')) for substring in fnparts if 'spin' in substring]
+                    spin = spin[0] if len(spin) != 0 else None
+                else:
+                    charge = 0
+                    spin = None
+                mol = pyscf.M(
+                    atom=molpath, basis=unc + bs,
+                    charge=charge, spin=spin,
+                    verbose=0)
 
                 mf = pyscf.scf.HF(mol)
                 mf.init_guess = 'atom'
