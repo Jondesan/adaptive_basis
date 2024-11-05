@@ -829,9 +829,7 @@ def find_subspace(
         data as described in Args section. Shell mask is returned
         instead of function mask if get_smask is True.
     """
-    print(scf_obj._opt)
     scf_obj_copy = scf_obj.copy()
-    print(scf_obj_copy._opt)
     fullbasis_mol = create_shell_separated_mol(mol)
     if dft:
         scf_obj_copy.to_ks()
