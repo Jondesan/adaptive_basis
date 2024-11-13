@@ -2,6 +2,7 @@
 
 # import pyscf
 import numpy as np
+from scipy import linalg
 from itertools import count
 from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem, to_general_contraction
 from pyscf.gto.ecp import core_configuration
@@ -62,17 +63,17 @@ def canonical_orth(h, s, get_idx=False):
         Sorted eigenvalues (ascending) and coefficients, if get_idx is
         True the indices that sort the eigenvalues are also returned
     """
-    # print(s.shape)
+    # print('s shape before orth:', s.shape)
     x = canonical_orth_(s, 1e-8)
-    # print(x.shape)
+    # print('s shape after orth:', x.shape)
     xhx = x.conj().T @ h @ x
-    e, c = np.linalg.eigh(xhx)
+    e, c = linalg.eigh(xhx)
     c = x @ c
     idx = np.argsort(e)
     # e = np.sort(e)
     if get_idx:
-        return e[idx], c[idx], idx
-    return e[idx], c[idx]
+        return e[idx], c[:,idx], idx
+    return e[idx], c[:,idx]
 
 
 def extract_basis(smask, shellsep_mol):
