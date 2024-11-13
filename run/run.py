@@ -155,7 +155,8 @@ def run_abs(
             myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
         myhf = myhf.apply(scf.addons.remove_linear_dep_)
         myhf.eig = adb.eigh
-
+        
+        print('Nfunc before kernel call:', myhf.mol.nao_nr())
         start = time()
         myhf.kernel()
         end = time()
@@ -361,7 +362,7 @@ if __name__ == "__main__":
         else:
             bs.append(b)
     mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec)
-    print(mols)
+    # print(mols)
     if 'all' in init_guesses:
         init_guesses = AVAIL_INIT_METHODS
     for mol in mols:
