@@ -192,6 +192,7 @@ def run_abs(
                     f.write(f"{charge:<15d} {spin:<15d}\n")
                     f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
+                    dm0=None
                     start = time()
                     if ig == 'SCF':
                         F = F_scf
