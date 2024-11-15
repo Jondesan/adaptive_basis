@@ -161,6 +161,8 @@ def run_abs(
         myhf.kernel()
         end = time()
         fullbasis_hf_time = end - start
+        F_scf = myhf.get_fock()
+
 
         for ig in init_guess:
             if ig == 'sap':
@@ -192,19 +194,17 @@ def run_abs(
 
                     start = time()
                     if ig == 'SCF':
-                        dm0 = None
-                    elif ig == 'vsap':
-                        tempmf = mol.KS().set(xc='b3lyp')
-                        dm0 = tempmf.get_init_guess(key='vsap')
+                        F = F_scf
                     else:
-                        myhf.sap_basis = sapbs
-                        dm0 = myhf.get_init_guess(key=ig)
+                        if ig == 'vsap':
+                            tempmf = mol.KS().set(xc='b3lyp')
+                            dm0 = tempmf.get_init_guess(key='vsap')
+                        else:
+                            myhf.sap_basis = sapbs
+                            dm0 = myhf.get_init_guess(key=ig)
+                        F = myhf.get_fock(dm=dm0)
                     end = time()
-                    F = myhf.get_fock()
-                    initF = myhf.get_fock(dm=dm0)
                     S = myhf.get_ovlp()
-                    mo_energy, mo_coeff = adb.eigh(initF, S)
-                    nocc = 2*mol.nelec[0] if len(F.shape)==2 else sum(mol.nelec)
                     f.write("time stats [s]\n")
                     f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
                     f.write(f"{(fullbasis_hf_time + end - start):15.9e}  ")
@@ -258,7 +258,7 @@ def run_abs(
                     f.write("{:<15s} {:<30s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
                     f.write(
                         "{:<15d} {:<30.20f} {:<15d}\n\n".format(
-                            nocc, myhf.e_tot, mol.nao_nr()
+                            np.sum(mol.nelec), myhf.e_tot, mol.nao_nr()
                         )
                     )
 
