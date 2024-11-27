@@ -660,7 +660,7 @@ def create_shell_separated_mol(mol, verbose=0):
     shell_sep_basis = get_uncontracted_basis(mol)
     cmol = gto.M(
         atom=mol.atom, basis=shell_sep_basis,
-        charge=mol.charge, spin=mol.spin,
+        charge=mol.charge, spin=mol.spin, unit=mol.unit,
         verbose=0)
     return cmol
 
@@ -980,14 +980,18 @@ def mask_analysis(
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedConvF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
-            scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                subbasis_mol, maskedConvF, maskedS,
-                dft=dft, xc=xc, grid_level=grid_level
-            )
-            Q_sqrd= get_q_sqrd(
-                fullbasis_coeffs, subbasis_coeffs,
-                ovlp[:,mask], nocc
-            )
+            if False:
+                scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
+                    subbasis_mol, maskedConvF, maskedS,
+                    dft=dft, xc=xc, grid_level=grid_level
+                )
+                Q_sqrd= get_q_sqrd(
+                    fullbasis_coeffs, subbasis_coeffs,
+                    ovlp[:,mask], nocc
+                )
+            else:
+                scf_energy, scf_orbital_energy, subbasis_coeffs = 0.0, 0.0, 0.0
+                Q_sqrd = 0.0
         else:
             mask = mask_i
             e, subbasis_coeffs = eigh(mask_matrix(fock, mask, RHF=RHF), mask_matrix(ovlp, mask))
