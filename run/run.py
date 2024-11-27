@@ -34,7 +34,10 @@ def get_files_in_folder(folder: str):
 
 
 def get_molecules_in_dir(
-    molpath: str, basis_sets: list, get_decontractions: bool = False
+    molpath: str,
+    basis_sets: list,
+    get_decontractions: bool = False,
+    unit='Angstrom'
 ):
     """Get molecule xyz files from molpath, can be directory or single file.
     """
@@ -67,6 +70,7 @@ def get_molecules_in_dir(
                     basis=unc + bs,
                     charge=charge,
                     spin=spin,
+                    unit=unit,
                     verbose=0,
                 )
                 mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
@@ -155,8 +159,6 @@ def run_abs(
             myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
         myhf = myhf.apply(scf.addons.remove_linear_dep_)
         myhf.eig = adb.eigh
-        
-        print('Nfunc before kernel call:', myhf.mol.nao_nr())
         start = time()
         myhf.kernel()
         end = time()
@@ -320,6 +322,11 @@ if __name__ == "__main__":
         help="Turn duplicate shell linking on/off during shell by shell calculations.",
     )
     parser.add_argument(
+        "-u", "--unit", type=str, required=False, default='Angstrom',
+        choices=['Angstrom', 'Bohr'],
+        help="coordinate units of xyz file"
+    )
+    parser.add_argument(
         "--nfunc_normalisation",
         action=argparse.BooleanOptionalAction,
         default=True,
@@ -345,6 +352,7 @@ if __name__ == "__main__":
     sapbasis = [sapbasis] if isinstance(sapbasis, str) else sapbasis
     init_guesses = args.init_guesses
     dft = args.dft
+    unit = args.unit
     bs = []
     bstemp = []
 
@@ -362,7 +370,7 @@ if __name__ == "__main__":
             bs.append(b)
         else:
             bs.append(b)
-    mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec)
+    mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec, unit=unit)
     # print(mols)
     if 'all' in init_guesses:
         init_guesses = AVAIL_INIT_METHODS
@@ -376,5 +384,5 @@ if __name__ == "__main__":
         conv_tol=conv_tol,
         sap_basis_sets=sapbasis,
         nfunc_normalisation=nfunc_norm,
-        dft=dft
+        dft=dft,
         )
