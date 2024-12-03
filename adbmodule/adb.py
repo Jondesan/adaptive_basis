@@ -980,7 +980,7 @@ def mask_analysis(
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedConvF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
-            if False:
+            if True:
                 scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
                     subbasis_mol, maskedConvF, maskedS,
                     dft=dft, xc=xc, grid_level=grid_level
