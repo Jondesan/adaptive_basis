@@ -962,8 +962,9 @@ def mask_analysis(
     RHF = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
 
+    if verbose:
+        print_data_header()
     dataframe = []
-    print_data_header()
     last_mask = [False] * fullbasis_mol.nao_nr()
     scf_energy = None
     scf_orbital_energy = None
