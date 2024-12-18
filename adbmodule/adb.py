@@ -11,9 +11,7 @@ from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
 from pyscf.scf import *
 from pyscf.scf.addons import canonical_orth_
-from pyscf import lib
-from pyscf import gto
-from pyscf import scf
+from pyscf import lib, gto, scf
 from warnings import warn
 from operator import itemgetter
 import copy
@@ -631,8 +629,8 @@ def get_sub_scf_attributes(
     mf = mf.apply(scf.addons.remove_linear_dep_)
     if dft:
         mf = mf.to_ks(xc=xc)
-        mf.grid.level = grid_level # FIXME
-        mf.grid.prune = None
+        mf.grids.level = grid_level # FIXME
+        mf.grids.prune = None
 
     # Diagonalize fock matrix and form guess density matrix
     if fock.shape[1] > 1:
@@ -892,11 +890,11 @@ def find_subspace(
 
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
-        if  mask_cutoff is None and \
-            abs(difference) < conv_tol or \
+        if  mask_cutoff is None         and \
+            abs(difference) < conv_tol  or \
             sum(mask) == len(mask):
             break
-        elif mask_cutoff is not None and \
+        elif mask_cutoff is not None    and \
              np.count_nonzero(mask)/len(mask) >= mask_cutoff:
             break
         previous_sum = current_criteria_val
@@ -977,10 +975,14 @@ def mask_analysis(
             newmask = [sm[0] for sm in smask]
             newbas = fullbasis_mol._bas[newmask]
             subbasis_mol._bas = newbas
+            submf = scf.HF(subbasis_mol)
 
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedConvF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
+            maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
+            if not np.allclose(maskedS, submf.get_ovlp()) or not np.allclose(maskedHcore, submf.get_hcore()):
+                raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
             if True:
                 scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
                     subbasis_mol, maskedConvF, maskedS,
