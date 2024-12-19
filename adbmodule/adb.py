@@ -405,23 +405,25 @@ def get_iteration_criteria_value(
         case 'enocc':
             RHF = (len(np.asarray(epsilon_i).shape) == 1)
             if RHF:
-                criteria = np.sum(epsilon_i[:nocc[0]])
+                criteria = np.sum(np.sort(epsilon_i)[:nocc[0]])
             else:
-                criteria  = np.sum(epsilon_i[0,:nocc[0]])
-                criteria += np.sum(epsilon_i[1,:nocc[1]]) 
+                criteria  = np.sum(np.sort(epsilon_i)[0,:nocc[0]])
+                criteria += np.sum(np.sort(epsilon_i)[1,:nocc[1]]) 
             return criteria
         case 'ecore':
             mocc = Csub[:,:nocc]
             P = mocc @ mocc.conj().T
-            return np.sum(P[:nocc,:nocc] @ (sub_hcore + np.diag(epsilon_i))[:nocc,:nocc])
+            return np.sum(
+                P[:nocc,:nocc]
+                @ (sub_hcore + np.diag(epsilon_i))[:nocc,:nocc] )
         case 'elden':
             return get_q_sqrd(Cfull, Csub, ovlp, nocc)
 
 
 def linked_shell_idx(smask):
     """ Return smask indices that correspond to duplicate shells, i.e.
-    if molecule has more than one of same atom type, the shells of that atom
-    will be duplicated.
+    if molecule has more than one of same atom type, the shells of that
+    atom will be duplicated.
 
     Args:
         smask : ndarray
@@ -489,7 +491,8 @@ def expand_mask(
             ecore: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
                where $h_{ii}=C_i^\dagger H_{core}C_i$
             elden: $\Delta Q$,
-               which is $1-\frac{1}{nocc}\sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
+               which is $1-\frac{1}{nocc}
+                * \sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
         link_shells : bool
             Whether to link shells of atoms of same type in the mask
             Optional, default is True
@@ -504,8 +507,8 @@ def expand_mask(
             XC functional string accepted by PySCF.
             Optional, default is 'b3lyp'.
         grid_level : int
-            predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
-            Optional, default is 3.
+            predefined integration grid levels, 0-9
+            (0 very sparse, 9 very dense). Optional, default is 3.
 
     Returns:
         The new mask (boolean ndarray), the current difference in
@@ -872,6 +875,7 @@ def find_subspace(
     
     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
+    basis_initialized = False
     while True:
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
@@ -890,6 +894,12 @@ def find_subspace(
 
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
+        previous_sum = current_criteria_val
+
+        if not basis_initialized:
+            basis_initialized = np.sum(mask) >= np.max(nocc)
+            continue
+        
         if  mask_cutoff is None         and \
             abs(difference) < conv_tol  or \
             sum(mask) == len(mask):
@@ -897,7 +907,6 @@ def find_subspace(
         elif mask_cutoff is not None    and \
              np.count_nonzero(mask)/len(mask) >= mask_cutoff:
             break
-        previous_sum = current_criteria_val
 
     if get_smask:
         mask = smask
