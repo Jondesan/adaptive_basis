@@ -5,7 +5,7 @@ import os
 import argparse
 
 import adb
-from pyscf import scf, gto
+from pyscf import scf, gto, dft
 import numpy as np
 import pandas as pd
 import datetime
@@ -96,17 +96,28 @@ if __name__ == '__main__':
         choices=['Angstrom', 'Bohr'],
         help="units of the xyz files"
     )
+    parser.add_argument(
+        "--conv_tol", type=float, required=False, default=1e-1,
+        help="convergence tolerance, default 1e-1"
+    )
     
     args = parser.parse_args()
     
     mpath = args.mpath
     basis = args.basis
     units = args.unit
+    conv_tol = args.conv_tol
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
     with open('output.out', 'w') as f:
         for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
-            mf = scf.HF(mol)
+            xcfunc = 'PBE'
+            grid_level = 3
+
+            mf = dft.KS(mol)
+            mf.grids.level = grid_level
+            mf.xc = xcfunc
+            mf.grids.prune = None
             mf.init_guess = 'atom'
 
             mf.kernel()
@@ -117,14 +128,15 @@ if __name__ == '__main__':
             F = mf.get_fock(dm=dm0)
 
             smaskhistory = adb.find_subspace(
-                F, S, mol, mf, conv_tol=1e-1,
+                F, S, mol, mf, conv_tol=conv_tol,
                 collect_data=False, get_smask=True,
-                return_mask_history=True
+                return_mask_history=True,
             )
 
             data_sbys = adb.mask_analysis(
                 smaskhistory, mol, mf,
-                F, S, verbose=False
+                F, S, verbose=True,
+                dft=True, xc=xcfunc, grid_level=grid_level,
             )
 
             f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\n')
