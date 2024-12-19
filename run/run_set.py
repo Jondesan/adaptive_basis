@@ -107,6 +107,7 @@ if __name__ == '__main__':
     basis = args.basis
     units = args.unit
     conv_tol = args.conv_tol
+    dft = False
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
     with open('output.out', 'w') as f:
@@ -114,24 +115,34 @@ if __name__ == '__main__':
             xcfunc = 'PBE'
             grid_level = 3
 
-            mf = dft.KS(mol)
-            mf.grids.level = grid_level
-            mf.xc = xcfunc
-            mf.grids.prune = None
+            # mf = dft.KS(mol)
+            mf = scf.HF(mol)
+            if dft:
+                mf.to_ks()
+                mf.grids.level = grid_level
+                mf.xc = xcfunc
+                mf.grids.prune = None
             mf.init_guess = 'atom'
 
+            start = time()
             mf.kernel()
+            end = time()
+            fullbasis_time = end - start
+
             fullbasis_energy = mf.e_tot
 
             dm0 = mf.get_init_guess(key=mf.init_guess)
             S = mf.get_ovlp()
             F = mf.get_fock(dm=dm0)
 
+            start = time()
             smaskhistory = adb.find_subspace(
                 F, S, mol, mf, conv_tol=conv_tol,
                 collect_data=False, get_smask=True,
                 return_mask_history=True,
             )
+            end = time()
+            subbasis_time = end - start
 
             data_sbys = adb.mask_analysis(
                 smaskhistory, mol, mf,
@@ -139,7 +150,42 @@ if __name__ == '__main__':
                 dft=True, xc=xcfunc, grid_level=grid_level,
             )
 
-            f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\n')
+            subbasis_mol = adb.create_shell_separated_mol(mol)
+            mask = [sm[0] for sm in smaskhistory[-1][0]]
+            newbas = mol._bas[mask]
+            subbasis_mol._bas = newbas
+            submf = scf.HF(subbasis_mol)
+            if dft:
+                submf.to_ks()
+                submf.grids.level = grid_level
+                submf.xc = xcfunc
+                submf.grids.prune = None
+            submf.init_guess = 'atom'
+            
+            mf = scf.HF(mol)
+            if dft:
+                mf.to_ks()
+                mf.grids.level = grid_level
+                mf.xc = xcfunc
+                mf.grids.prune = None
+            mf.init_guess = 'atom'
+
+            mask = adb.smask_to_mask(smaskhistory[-1][0])
+            start = time()
+            submf.kernel()
+            dm0 = submf.make_rdm1()
+            initdm = np.zeros_like(S)
+
+            idx = np.where(mask)[0]
+            for j,i in enumerate(idx):
+                initdm[i][idx] = dm0[j]
+            mf.kernel(dm0=initdm)
+            end = time()
+
+            subinit_time = end - start
+
+            f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t')
+            f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t{subinit_time:.4f}\n')
 
 
 
