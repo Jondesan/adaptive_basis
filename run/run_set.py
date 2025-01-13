@@ -100,14 +100,20 @@ if __name__ == '__main__':
         "--conv_tol", type=float, required=False, default=1e-1,
         help="convergence tolerance, default 1e-1"
     )
-    
+    parser.add_argument(
+        "--normalisation", type=int, required=False, default=1,
+        choices=[0,1],
+        help="whether to use normalisation"
+    )
+
     args = parser.parse_args()
     
     mpath = args.mpath
     basis = args.basis
     units = args.unit
     conv_tol = args.conv_tol
-    dft = False
+    normalisation = args.normalisation
+    run_dft = True
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
     with open('output.out', 'w') as f:
@@ -115,10 +121,8 @@ if __name__ == '__main__':
             xcfunc = 'PBE'
             grid_level = 3
 
-            # mf = dft.KS(mol)
-            mf = scf.HF(mol)
-            if dft:
-                mf.to_ks()
+            mf = dft.KS(mol) if run_dft else scf.HF(mol)
+            if run_dft:
                 mf.grids.level = grid_level
                 mf.xc = xcfunc
                 mf.grids.prune = None
@@ -140,6 +144,7 @@ if __name__ == '__main__':
                 F, S, mol, mf, conv_tol=conv_tol,
                 collect_data=False, get_smask=True,
                 return_mask_history=True,
+                nfunc_normalisation=normalisation,
             )
             end = time()
             subbasis_time = end - start
@@ -154,17 +159,15 @@ if __name__ == '__main__':
             mask = [sm[0] for sm in smaskhistory[-1][0]]
             newbas = mol._bas[mask]
             subbasis_mol._bas = newbas
-            submf = scf.HF(subbasis_mol)
-            if dft:
-                submf.to_ks()
+            submf = dft.KS(subbasis_mol) if run_dft else scf.HF(subbasis_mol) 
+            if run_dft:
                 submf.grids.level = grid_level
                 submf.xc = xcfunc
                 submf.grids.prune = None
             submf.init_guess = 'atom'
             
-            mf = scf.HF(mol)
-            if dft:
-                mf.to_ks()
+            mf = dft.KS(mol) if run_dft else scf.HF(mol)
+            if run_dft:
                 mf.grids.level = grid_level
                 mf.xc = xcfunc
                 mf.grids.prune = None
