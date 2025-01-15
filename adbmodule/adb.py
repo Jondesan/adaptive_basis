@@ -813,6 +813,8 @@ def atomic_block_minimal_basis(
 ):
     """Create minimal basis from atomic block decomposition.
     """
+
+    # TODO: Add mask_history output
     func_per_atom = basis_functions_per_atom(mol)
     assert np.sum(func_per_atom) == mol.nao
 
@@ -842,14 +844,23 @@ def atomic_block_minimal_basis(
         nfunc_per_minimal_atom = int(np.ceil(ELEMENTS.index(atom) / 2))
         nfuncs_min_tot += nfunc_per_minimal_atom
         
-        e_atom, c_atom = eigh(F_atom.copy(), S_atom.copy())
+        # TODO: implement spherical average of Fock matrix
+        F_ave = F_atom.copy()
+
+
+        e_atom, c_atom = eigh(F_ave, S_atom.copy())
+        # print(f'{e_atom=}')
         occs = np.zeros(c_atom.shape[1])
         occs[:nfunc_per_minimal_atom] = 2
         P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
         # print(f'{e_atom[:nfunc_per_minimal_atom]}')
 
         atom_indices = set()
-        while len(atom_indices) < nfunc_per_minimal_atom:
+        # TODO: Q - N_at < .1
+        Q = 1
+        eps = 0.1
+        # while len(atom_indices) < nfunc_per_minimal_atom:
+        while np.abs(Q - 2*nfunc_per_minimal_atom) > eps:
             P_atom_idx = np.unravel_index(np.argmax(P_atom, axis=None),P_atom.shape)
             # TODO: Make sure only one index tuple is used
 
@@ -861,17 +872,31 @@ def atomic_block_minimal_basis(
                 mask_atom[Pat_j] = True
                 smask_atom = mask_to_smask(mask_atom, smask_atom, mol.cart)
                 mask_atom = smask_to_mask(smask_atom, mol.cart)
+                e_mask, c_mask = eigh(
+                    mask_matrix(F_ave.copy(), mask_atom),
+                    mask_matrix(S_atom.copy(), mask_atom)
+                    )
+                # print(f'{c_mask.shape=} {c_atom.shape=} {S_atom.shape=}')
+                # c_mask_tmp = np.zeros(c_atom.shape)
+                # c_mask_tmp[:, mask_atom] = c_mask
+                # c_mask = c_mask_tmp
+                # print(f'{c_mask.shape=} {c_atom.shape=} {S_atom.shape=}')
+
                 # set elements i,j and j,i of P_atom to zero
-                # for idx in np.where(mask_atom):
                 P_atom[mask_atom, :] = 0
                 P_atom[:, mask_atom] = 0
                 # add indices to atom_indices
                 atom_indices.update(np.where(mask_atom)[0].tolist())
+                Q = get_q_sqrd(
+                    c_atom.copy(), c_mask,
+                    S_atom[:, mask_atom].copy(),
+                    (nfunc_per_minimal_atom, nfunc_per_minimal_atom)
+                    )
+                print(f'{Q=}\n{np.abs(Q - 2*nfunc_per_minimal_atom)=}')
             else:
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
                 P_atom[Pat_i, Pat_j] = 0
                 P_atom[np.flip((Pat_i, Pat_j))] = 0
-            # print(f'{atom_indices=}')
         atom_indices = list(atom_indices)
         minimal_basis_mask[func_offset + np.asarray(atom_indices)] = True
 
@@ -990,6 +1015,7 @@ def find_subspace(
 
     changes = mask_init_idx
     for change in changes:
+        # TODO: Add all changes to mask_history
         print(f'{change=}')
         ao_labels = np.array(fullbasis_mol.ao_labels())[change]
         num, symb = ao_labels.split()[:2]
