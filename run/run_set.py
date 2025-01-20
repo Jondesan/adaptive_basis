@@ -109,6 +109,10 @@ if __name__ == '__main__':
         choices=[0,1],
         help="whether to use normalisation"
     )
+    parser.add_argument(
+        "--output", type=str, required=False, default='output.out',
+        help="name of output file"
+    )
 
     args = parser.parse_args()
     
@@ -118,10 +122,11 @@ if __name__ == '__main__':
     conv_tol = args.conv_tol
     q_tol = args.q_tol
     normalisation = args.normalisation
+    output = args.output
     run_dft = True
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
-    with open('output.out', 'w') as f:
+    with open(output, 'w') as f:
         for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
             xcfunc = 'PBE'
             grid_level = 3
