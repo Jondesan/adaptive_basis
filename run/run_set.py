@@ -101,6 +101,10 @@ if __name__ == '__main__':
         help="convergence tolerance, default 1e-1"
     )
     parser.add_argument(
+        "--q_tol", type=float, required=False, default=.5,
+        help="charge tolerance, default .5"
+    )
+    parser.add_argument(
         "--normalisation", type=int, required=False, default=1,
         choices=[0,1],
         help="whether to use normalisation"
@@ -112,6 +116,7 @@ if __name__ == '__main__':
     basis = args.basis
     units = args.unit
     conv_tol = args.conv_tol
+    q_tol = args.q_tol
     normalisation = args.normalisation
     run_dft = True
 
@@ -145,6 +150,7 @@ if __name__ == '__main__':
                 collect_data=False, get_smask=True,
                 return_mask_history=True,
                 nfunc_normalisation=normalisation,
+                abd_Q_tol=q_tol,
             )
             end = time()
             subbasis_time = end - start
@@ -165,7 +171,7 @@ if __name__ == '__main__':
                 submf.xc = xcfunc
                 submf.grids.prune = None
             submf.init_guess = 'atom'
-            
+
             mf = dft.KS(mol) if run_dft else scf.HF(mol)
             if run_dft:
                 mf.grids.level = grid_level
@@ -188,7 +194,8 @@ if __name__ == '__main__':
             subinit_time = end - start
 
             f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t')
-            f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t{subinit_time:.4f}\n')
+            f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t{subinit_time:.4f}')
+            f.write(f'{np.sum(mask)}\n')
 
 
 
