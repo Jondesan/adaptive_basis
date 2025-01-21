@@ -131,7 +131,6 @@ if __name__ == '__main__':
             xcfunc = 'PBE'
             grid_level = 3
 
-            # TODO: Add unrestricted
             # mf = dft.RKS(mol) if run_dft else scf.RHF(mol)
             mf = dft.KS(mol) if run_dft else scf.HF(mol)
             if run_dft:
@@ -150,7 +149,6 @@ if __name__ == '__main__':
             dm0 = mf.get_init_guess(key=mf.init_guess)
             S = mf.get_ovlp()
             F = mf.get_fock(dm=dm0)
-
             start = time()
             smaskhistory = adb.find_subspace(
                 F, S, mol, mf, conv_tol=conv_tol,
