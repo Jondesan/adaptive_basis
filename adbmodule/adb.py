@@ -781,9 +781,10 @@ def mask_matrix(mat, mask, RHF=True):
         masked_mat : ndarray
             The masked matrix
     """
-    if RHF != (len(mat.shape) == 2):
-        raise RuntimeError("")
-
+    # print(f'{mat.shape=}')
+    # if RHF != (len(mat.shape) == 2):
+    #     raise RuntimeError("")
+    RHF = (len(mat.shape) == 2)
     return mat[mask, :][:, mask] if RHF else mat[:, mask, :][:, :, mask]
 
 
@@ -801,8 +802,8 @@ def basis_functions_per_atom(mol):
 
 def atomic_block_minimal_basis(
     mol,
-    F=None,
-    S=None,
+    F,
+    S,
     Q_tol=.5,
     by_shell=True,
     get_mask_history=True,
@@ -819,14 +820,9 @@ def atomic_block_minimal_basis(
         mask_history = []
         full_mask = np.zeros(mol.nao, dtype=bool)
 
-        
-    # Get initial Fock matrix and overlap if not provided.
-    if F is None or S is None:
-        mf = scf.HF(mol)
-        dm0 = mf.init_guess_by_atom()
-        F = mf.get_fock(dm=dm0)
-        S = mf.get_ovlp()
     atoms = list(map(lambda x: x[0], mol._atom))
+
+    restricted = (len(F.shape) == 2)
     
     # Loop through atomic blocks in the Fock matrix
     nfuncs_min_tot = 0
@@ -848,9 +844,17 @@ def atomic_block_minimal_basis(
 
 
         e_atom, c_atom = eigh(F_ave, S_atom.copy())
-        occs = np.zeros(c_atom.shape[1])
-        occs[:nfunc_per_minimal_atom] = 2
-        P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
+        if restricted:
+            occs = np.zeros(c_atom.shape[1])
+            occs[:nfunc_per_minimal_atom] = 2
+            P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
+        else:
+            occs = np.zeros((2, c_atom.shape[2]))
+            occs[:, :nfunc_per_minimal_atom] = 1
+            P_atom = .5 * np.abs(
+                c_atom[0] @ np.diag(occs[0]) @ c_atom[0].conj().T +
+                c_atom[1] @ np.diag(occs[1]) @ c_atom[1].conj().T
+                )
 
         atom_indices = set()
         Q = 1

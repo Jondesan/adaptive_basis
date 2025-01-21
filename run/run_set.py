@@ -131,6 +131,8 @@ if __name__ == '__main__':
             xcfunc = 'PBE'
             grid_level = 3
 
+            # TODO: Add unrestricted
+            # mf = dft.RKS(mol) if run_dft else scf.RHF(mol)
             mf = dft.KS(mol) if run_dft else scf.HF(mol)
             if run_dft:
                 mf.grids.level = grid_level
@@ -184,22 +186,22 @@ if __name__ == '__main__':
                 mf.grids.prune = None
             mf.init_guess = 'atom'
 
-            mask = adb.smask_to_mask(smaskhistory[-1][0])
-            start = time()
-            submf.kernel()
-            dm0 = submf.make_rdm1()
-            initdm = np.zeros_like(S)
+            # mask = adb.smask_to_mask(smaskhistory[-1][0])
+            # start = time()
+            # submf.kernel()
+            # dm0 = submf.make_rdm1()
+            # initdm = np.zeros_like(S)
 
-            idx = np.where(mask)[0]
-            for j,i in enumerate(idx):
-                initdm[i][idx] = dm0[j]
-            mf.kernel(dm0=initdm)
-            end = time()
+            # idx = np.where(mask)[0]
+            # for j,i in enumerate(idx):
+            #     initdm[i][idx] = dm0[j]
+            # mf.kernel(dm0=initdm)
+            # end = time()
 
-            subinit_time = end - start
+            # subinit_time = end - start
 
             f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t')
-            f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t{subinit_time:.4f}\t')
+            f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
             f.write(f'{np.sum(mask)}\t{len(mask)}\n')
 
 
