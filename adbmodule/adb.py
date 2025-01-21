@@ -800,6 +800,46 @@ def basis_functions_per_atom(mol):
     return func_per_atom
 
 
+def spherical_average(mat, ml):
+    """Calculate the spherical average of a matrix.
+
+    Args:
+        mat : ndarray
+            The (Fock) matrix which will be spherically averaged.
+        ml : ndarray | arraylike
+            An array with the numbers of functions on the shells.
+    """
+
+    mat_copy = mat.copy()
+    restricted = (len(mat_copy.shape) == 2)
+    if restricted:
+        return sph_avg(mat_copy, ml)
+    mat_out = np.ndarray(mat_copy.shape)
+    mat_out[0] = sph_avg(mat_copy[0], ml)
+    mat_out[1] = sph_avg(mat_copy[1], ml)
+    return mat_out
+
+
+def sph_avg(mat, ml):
+    mat_copy = mat.copy()
+    offset = 0
+    for nfunc in ml:
+        if nfunc == 1:
+            offset += nfunc
+            continue
+        shell_mat = mat_copy[offset:offset+nfunc, offset:offset+nfunc]
+        # Extract diagonal of the shell block
+        diag = np.diag(shell_mat)
+        avg = np.mean(diag)
+        shell_mat = np.diag([avg]*diag.shape[0])
+
+        for i in range(nfunc):
+            mat_copy[offset+i,offset:offset+nfunc] = shell_mat[i,:]
+
+        offset += nfunc
+    return mat_copy
+
+
 def atomic_block_minimal_basis(
     mol,
     F,
@@ -814,8 +854,8 @@ def atomic_block_minimal_basis(
     assert np.sum(func_per_atom) == mol.nao
 
     minimal_basis_mask = np.zeros(mol.nao, dtype=bool)
-    if by_shell:
-        smask = init_smask(mol, mol.cart)
+    # if by_shell:
+    smask = init_smask(mol, mol.cart)
     if get_mask_history:
         mask_history = []
         full_mask = np.zeros(mol.nao, dtype=bool)
@@ -839,9 +879,10 @@ def atomic_block_minimal_basis(
         nfunc_per_minimal_atom = int(np.ceil(ELEMENTS.index(atom) / 2))
         nfuncs_min_tot += nfunc_per_minimal_atom
         
-        # TODO: implement spherical average of Fock matrix
+        # TODO: fix the shell array (currently for whole mol, not just atomic block)
+        smask_atom = [sm for sm in smask if sm[3][0] == i]
         F_ave = F_atom.copy()
-
+        F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
 
         e_atom, c_atom = eigh(F_ave, S_atom.copy())
         if restricted:
