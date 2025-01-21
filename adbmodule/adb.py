@@ -1000,6 +1000,8 @@ def find_subspace(
         data as described in Args section. Shell mask is returned
         instead of function mask if get_smask is True.
     """
+    if verbose:
+        print('Running find_subspace for mol ', mol.atom)
     scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
     if dft:
