@@ -113,6 +113,12 @@ if __name__ == '__main__':
         "--output", type=str, required=False, default='output.out',
         help="name of output file"
     )
+    parser.add_argument(
+        "--dft",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use DFT, optional. Default is False.",
+    )
 
     args = parser.parse_args()
     
@@ -123,7 +129,7 @@ if __name__ == '__main__':
     q_tol = args.q_tol
     normalisation = args.normalisation
     output = args.output
-    run_dft = True
+    run_dft = args.dft
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
     with open(output, 'w') as f:
@@ -137,10 +143,9 @@ if __name__ == '__main__':
                 mf.grids.level = grid_level
                 mf.xc = xcfunc
                 mf.grids.prune = None
-            mf.init_guess = 'atom'
 
             start = time()
-            mf.kernel()
+            mf.kernel(init_guess='atom')
             end = time()
             fullbasis_time = end - start
 
@@ -163,7 +168,7 @@ if __name__ == '__main__':
             data_sbys = adb.mask_analysis(
                 smaskhistory, mol, mf,
                 F, S, verbose=True,
-                dft=True, xc=xcfunc, grid_level=grid_level,
+                dft=run_dft, xc=xcfunc, grid_level=grid_level,
             )
 
             subbasis_mol = adb.create_shell_separated_mol(mol)
@@ -175,25 +180,25 @@ if __name__ == '__main__':
                 submf.grids.level = grid_level
                 submf.xc = xcfunc
                 submf.grids.prune = None
-            submf.init_guess = 'atom'
+            # submf.init_guess = 'atom'
 
             mf = dft.KS(mol) if run_dft else scf.HF(mol)
             if run_dft:
                 mf.grids.level = grid_level
                 mf.xc = xcfunc
                 mf.grids.prune = None
-            mf.init_guess = 'atom'
+            # mf.init_guess = 'atom'
 
             # mask = adb.smask_to_mask(smaskhistory[-1][0])
             # start = time()
-            # submf.kernel()
+            # submf.kernel(init_guess='atom')
             # dm0 = submf.make_rdm1()
             # initdm = np.zeros_like(S)
 
             # idx = np.where(mask)[0]
             # for j,i in enumerate(idx):
             #     initdm[i][idx] = dm0[j]
-            # mf.kernel(dm0=initdm)
+            # mf.kernel(dm0=initdm, init_guess='atom')
             # end = time()
 
             # subinit_time = end - start
