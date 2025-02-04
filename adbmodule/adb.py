@@ -706,7 +706,7 @@ def create_shell_separated_mol(mol, verbose=0):
 
 def print_data_header():
     print(
-            f'\n{"N_func":>10s}  {"Added ao/shell(s)":>18s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
+            f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
         )
 
 
@@ -728,8 +728,8 @@ def print_data(
         Qsqrd = "-"
 
     print(f"{sum(mask):10d}", end="")
-    print(f" {ao_or_shell_label:>18s}", end="")
-    print(f" {criteria_value:15.9f}", end="")
+    print(f" {ao_or_shell_label:>13s}", end="")
+    print(f" {criteria_value:16.9f}", end="")
     print(f'  {diff:{">15s" if isinstance(diff, str) else "15.9f"}}', end="")
     print(f'  {E_scf:{">15s" if isinstance(E_scf, str) else "15.9f"}}', end="")
     print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "18.12f"}}')
@@ -894,8 +894,9 @@ def atomic_block_minimal_basis(
             #print(f'{energies=} {nfuncs_include=} {energies[nfuncs_include+1]-energies[nfunc_per_minimal_atom]=}')
             return nfuncs_include
 
-        print(f'{nfunc_per_minimal_atom=}') 
-        print(f'{e_atom=}')
+        # print(f'{nfunc_per_minimal_atom=}')
+        print(f'{e_atom=}') # TODO: Tidy up the print
+        # print only bound states, up to some reasonable number
         print(f'Energy of highest orbital {e_atom[number_of_states(e_atom)-1]*27.2114} eV')
 
         if restricted:
@@ -1326,6 +1327,7 @@ def mask_analysis(
                 label = get_atom_shell_label(mol, changes[0], link_shells=link_shells*initialized)
                 if link_shells:
                     label = ' '.join(label.split(' ')[1:])
+                    label = '*'+label
             else:
                 changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
                 aolabels = fullbasis_mol.ao_labels()
