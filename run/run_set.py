@@ -40,7 +40,7 @@ def get_molecules_in_dir(
             fs = get_files_in_folder(prefix)
             fs = [prefix + '/' + f for f in fs]
         else:
-            fs = [molpath]
+            fs = [prefix]
     else:
         fs = molpath
     molecules = []
@@ -120,7 +120,13 @@ if __name__ == '__main__':
         "--dft",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Whether to use DFT, optional. Default is False.",
+        help="Whether to use DFT, optional. Default is True.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether output is robust or not, optional. Default is True.",
     )
 
     args = parser.parse_args()
@@ -133,6 +139,7 @@ if __name__ == '__main__':
     normalisation = args.normalisation
     output = args.output
     run_dft = args.dft
+    verbose = args.verbose
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
     with open(output, 'w') as f:
@@ -164,15 +171,17 @@ if __name__ == '__main__':
                 return_mask_history=True,
                 nfunc_normalisation=normalisation,
                 abd_Q_tol=q_tol,
+                verbose=verbose,
             )
             end = time()
             subbasis_time = end - start
 
             data_sbys = adb.mask_analysis(
                 smaskhistory, mol, mf,
-                F, S, verbose=True,
+                F, S, verbose=verbose,
                 dft=run_dft, xc=xcfunc, grid_level=grid_level,
             )
+            # print(f'{data_sbys=}')
 
             subbasis_mol = adb.create_shell_separated_mol(mol)
             mask = [sm[0] for sm in smaskhistory[-1][0]]
@@ -210,8 +219,9 @@ if __name__ == '__main__':
             f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
             f.write(f'{np.sum(mask)}\t{len(mask)}\n')
 
+            func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
             print(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t', end='')
             print(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
-            print(f'{np.sum(mask)}\t{len(mask)}\n')
+            print(f'{np.sum(func_mask)}\t{len(func_mask)}\n')
 
 
