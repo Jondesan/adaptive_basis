@@ -27,7 +27,7 @@ def get_files_in_folder(folder: str):
 
 
 def get_molecules_in_dir(
-    molpath: str,
+    molpath: str | list,
     basis_sets: list,
     get_decontractions: bool = False,
     unit='Angstrom'
@@ -35,11 +35,14 @@ def get_molecules_in_dir(
     """Get molecule xyz files from molpath, can be directory or single file.
     """
     prefix = molpath
-    if os.path.isdir(prefix):
-        fs = get_files_in_folder(prefix)
-        fs = [prefix + '/' + f for f in fs]
+    if isinstance(molpath, str):
+        if os.path.isdir(prefix):
+            fs = get_files_in_folder(prefix)
+            fs = [prefix + '/' + f for f in fs]
+        else:
+            fs = [molpath]
     else:
-        fs = [molpath]
+        fs = molpath
     molecules = []
     for fn in fs:
         if fn.split("/")[-1][0] == "#":
@@ -84,7 +87,7 @@ if __name__ == '__main__':
         description="Run adaptive basis Hartree-Fock calculations for given set."
     )
     parser.add_argument(
-        "--mpath", type=str, required=True,
+        "--mpath", type=str, required=True, nargs='+',
         help="path to molecule directory"
     )
     parser.add_argument(
