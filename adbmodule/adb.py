@@ -888,7 +888,10 @@ def atomic_block_minimal_basis(
         if restricted:
             occs = np.zeros(c_atom.shape[1])
             occs[:nfunc_per_minimal_atom] = 2
-            P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
+            # P_atom1 = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
+            P_atom = np.abs(
+                np.einsum('ik,kj,lj->il', c_atom, np.diag(occs), c_atom.conj())
+            )
         else:
             occs = np.zeros((2, c_atom.shape[2]))
             occs[:, :nfunc_per_minimal_atom] = 1
@@ -911,7 +914,8 @@ def atomic_block_minimal_basis(
             if not isinstance(P_atom_idx[0], np.int64):
                 P_atom_idx = P_atom_idx[0]
             Pat_i, Pat_j = P_atom_idx
-
+            # print(f'{P_atom_idx=}, {P_atom[P_atom_idx]}')
+            # print(f'{np.diag(P_atom)}')
             # Set functions of same shell to True
             if by_shell:
                 mask_atom[Pat_i] = True
@@ -939,7 +943,7 @@ def atomic_block_minimal_basis(
                     S_atom[:, mask_atom].copy(),
                     (nfunc_per_minimal_atom, nfunc_per_minimal_atom)
                     )
-                # print(f'{Q=}\n{np.abs(Q - 2*nfunc_per_minimal_atom)=}')
+                print(f'{Q=}, {np.abs(Q - 2*nfunc_per_minimal_atom)=}, {eps=}')
             else:
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
                 P_atom[Pat_i, Pat_j] = 0
@@ -1073,24 +1077,6 @@ def find_subspace(
     smask = None
     nocc = mol.nelec
 
-    # aolabels = fullbasis_mol.ao_labels()
-    # for i in range(len(Fii)):
-    #     print(f'{aolabels[i]} {Fii[i]}')
-
-    # changes = mask_init_idx
-    # for change in changes:
-    #     # print(f'{change=}')
-    #     ao_labels = np.array(fullbasis_mol.ao_labels())[change]
-    #     num, symb = ao_labels.split()[:2]
-    #     label = ""
-    #     label += "" if link_shells else f"{num} "
-    #     shllbl = re.findall(r'(\d+[a-zA-Z])', ao_labels.split()[2])[0]
-    #     label += f"{symb} {shllbl}"
-    #     print_data(
-    #         mask, Fii[change], 0.0, label, 0.0, 0.0,
-    #         print_header=False
-    #     )
-
     if get_smask:
         smask = init_smask(fullbasis_mol, fullbasis_mol.cart)
         smask = mask_to_smask(mask, smask, fullbasis_mol.cart)
@@ -1123,10 +1109,10 @@ def find_subspace(
             mask_history = [(
                 copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
                 previous_sum,
-                0.0, 'Max element of Fock matrix')]
+                0.0,
+                'Max element of Fock matrix')]
     
     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-
     basis_initialized = False
     while True and not mask.all():
         mask, difference, current_criteria_val, smask = expand_mask(
