@@ -27,15 +27,15 @@ def get_files_in_folder(folder: str):
 
 
 def get_molecules_in_dir(
-    molpath: str | list,
+    molpath: list,
     basis_sets: list,
     get_decontractions: bool = False,
     unit='Angstrom'
 ):
     """Get molecule xyz files from molpath, can be directory or single file.
     """
-    prefix = molpath
-    if isinstance(molpath, str):
+    if len(molpath) == 1:
+        prefix = molpath[0]
         if os.path.isdir(prefix):
             fs = get_files_in_folder(prefix)
             fs = [prefix + '/' + f for f in fs]
