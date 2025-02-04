@@ -847,6 +847,7 @@ def atomic_block_minimal_basis(
     Q_tol=.5,
     by_shell=True,
     get_mask_history=True,
+    link_shells=False,
 ):
     """Create minimal basis from atomic block decomposition.
     """
@@ -880,33 +881,52 @@ def atomic_block_minimal_basis(
         nfuncs_min_tot += nfunc_per_minimal_atom
         
         # TODO: fix the shell array (currently for whole mol, not just atomic block)
-        smask_atom = [sm for sm in smask if sm[3][0] == i]
         F_ave = F_atom.copy()
-        F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
+        #smask_atom = [sm for sm in smask if sm[3][0] == i]
+        #F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
 
         e_atom, c_atom = eigh(F_ave, S_atom.copy())
+
+        def number_of_states(energies, thresh=1e-3):
+            nfuncs_include = nfunc_per_minimal_atom
+            while energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
+                nfuncs_include += 1
+            #print(f'{energies=} {nfuncs_include=} {energies[nfuncs_include+1]-energies[nfunc_per_minimal_atom]=}')
+            return nfuncs_include
+
+        print(f'{nfunc_per_minimal_atom=}') 
+        print(f'{e_atom=}')
+        print(f'Energy of highest orbital {e_atom[number_of_states(e_atom)-1]*27.2114} eV')
+
         if restricted:
             occs = np.zeros(c_atom.shape[1])
-            occs[:nfunc_per_minimal_atom] = 2
-            # P_atom1 = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
+            occs[:number_of_states(e_atom)] = 2
+            Qlim = 2*number_of_states(e_atom)
+            nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
+            # P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
             P_atom = np.abs(
                 np.einsum('ik,kj,lj->il', c_atom, np.diag(occs), c_atom.conj())
             )
         else:
             occs = np.zeros((2, c_atom.shape[2]))
-            occs[:, :nfunc_per_minimal_atom] = 1
-            P_atom = .5 * np.abs(
+            occs[0, :number_of_states(e_atom[0])] = 1
+            occs[1, :number_of_states(e_atom[1])] = 1
+            P_atom = np.abs(
                 c_atom[0] @ np.diag(occs[0]) @ c_atom[0].conj().T +
                 c_atom[1] @ np.diag(occs[1]) @ c_atom[1].conj().T
                 )
+            Qlim = number_of_states(e_atom[0])+number_of_states(e_atom[1])
+            nocca, noccb = number_of_states(e_atom[0]), number_of_states(e_atom[1])
+        print(f'{Qlim=}')
 
         atom_indices = set()
-        Q = 1
+        Q = 0
         eps = Q_tol
-        if eps >= nfunc_per_minimal_atom:
-            raise ValueError('Tolerance for Q must be smaller than the number of electrons on the atom with the smallest number of electrons!')
+        if eps >= Qlim:
+            raise ValueError(f'Tolerance for Q must be smaller than the number of states, {Qlim=}!')
         # while len(atom_indices) < nfunc_per_minimal_atom:
-        while np.abs(Q - 2*nfunc_per_minimal_atom) > eps:
+        P_atom = np.round(P_atom, 12)
+        while np.abs(Q - Qlim) > eps:
             P_atom_idx = np.unravel_index(np.argmax(P_atom, axis=None),P_atom.shape)
             # Check whether only 1 index tuple was found (no two equal 
             # elements in P_atom), otherwise set P_atom_idx to the first
@@ -914,8 +934,7 @@ def atomic_block_minimal_basis(
             if not isinstance(P_atom_idx[0], np.int64):
                 P_atom_idx = P_atom_idx[0]
             Pat_i, Pat_j = P_atom_idx
-            # print(f'{P_atom_idx=}, {P_atom[P_atom_idx]}')
-            # print(f'{np.diag(P_atom)}')
+            
             # Set functions of same shell to True
             if by_shell:
                 mask_atom[Pat_i] = True
@@ -928,22 +947,30 @@ def atomic_block_minimal_basis(
                     )
                 
                 if get_mask_history:
-                    full_mask[func_offset:func_offset + funcs][Pat_i] = True
-                    full_mask[func_offset:func_offset + funcs][Pat_j] = True
+                    # set Pat_i and Pat_j in the full mask to True in
+                    # the current atom block
+                    full_mask[func_offset + Pat_i] = True
+                    full_mask[func_offset + Pat_j] = True
                     full_smask = mask_to_smask(full_mask, smask.copy(), mol.cart)
                     mask_history.append(full_smask)
 
                 # set elements i,j and j,i of P_atom to zero
                 P_atom[mask_atom, :] = 0
                 P_atom[:, mask_atom] = 0
+
                 # add indices to atom_indices
                 atom_indices.update(np.where(mask_atom)[0].tolist())
                 Q = get_q_sqrd(
                     c_atom.copy(), c_mask,
                     S_atom[:, mask_atom].copy(),
-                    (nfunc_per_minimal_atom, nfunc_per_minimal_atom)
+                    (nocca, noccb),
                     )
-                print(f'{Q=}, {np.abs(Q - 2*nfunc_per_minimal_atom)=}, {eps=}')
+                # Teekkarin debugger ###########################
+                tempmaskarr = np.zeros(len(full_mask))
+                tempmaskarr[func_offset + Pat_i] = True
+                shell_idx = maskidx_to_smaskidx(tempmaskarr, smask)[func_offset + Pat_i]
+                print(f'{get_atom_shell_label(mol, shell_idx)}: {Q=:.14f}, {np.abs(Q - Qlim)=:.14f}, {eps=}')
+                # Teekkarin debugger ###########################
             else:
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
                 P_atom[Pat_i, Pat_j] = 0
@@ -1068,7 +1095,8 @@ def find_subspace(
             mol,
             F,
             S,
-            Q_tol=abd_Q_tol)
+            Q_tol=abd_Q_tol,
+            link_shells=link_shells)
         mask_init_idx = np.where(mask)[0]
     else:
         mask_init_idx = [np.argmin(Fii)]
@@ -1083,6 +1111,8 @@ def find_subspace(
         if link_shells:
             # If link_shells true, set same shells of same atoms to True
             smask = set_linked_shells(smask, True)
+            # if verbose:
+            #     print('\nLinked shells: ON\n')
 
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
@@ -1111,7 +1141,7 @@ def find_subspace(
                 previous_sum,
                 0.0,
                 'Max element of Fock matrix')]
-    
+
     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
     basis_initialized = False
     while True and not mask.all():
@@ -1247,7 +1277,13 @@ def mask_analysis(
         
         print('\nNumber of toggled functions:', np.sum(last_mask))
         print(20*'#' + ' INITIALIZATION END ' + 61*'#')
+
+        if link_shells:
+            print('\nLink shells: ON')
+            print('Additional functions may be added due to shell linking!')
+        
         print_data_header()
+
 
     for mask_i, current_val, difference, *init in mask_history:
         if is_smask:
@@ -1288,6 +1324,8 @@ def mask_analysis(
             if is_smask:
                 changes = [i for i in range(len(smask)) if smask[i][0] != last_smask[i][0]]
                 label = get_atom_shell_label(mol, changes[0], link_shells=link_shells*initialized)
+                if link_shells:
+                    label = ' '.join(label.split(' ')[1:])
             else:
                 changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
                 aolabels = fullbasis_mol.ao_labels()
