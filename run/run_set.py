@@ -145,7 +145,7 @@ if __name__ == '__main__':
     with open(output, 'w') as f:
         for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
             xcfunc = 'PBE'
-            grid_level = 3
+            grid_level = 7
 
             # mf = dft.RKS(mol) if run_dft else scf.RHF(mol)
             mf = dft.KS(mol) if run_dft else scf.HF(mol)
