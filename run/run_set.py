@@ -215,12 +215,12 @@ if __name__ == '__main__':
 
             # subinit_time = end - start
 
+            func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
             f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t')
             f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
-            f.write(f'{np.sum(mask)}\t{len(mask)}\n')
+            f.write(f'{np.sum(func_mask)}\t{len(func_mask)}\n')
             f.flush()
 
-            func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
             print(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t', end='')
             print(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
             print(f'{np.sum(func_mask)}\t{len(func_mask)}\n')
