@@ -143,7 +143,7 @@ if __name__ == '__main__':
                 mf.grids.level = grid_level
                 mf.xc = xcfunc
                 mf.grids.prune = None
-
+            
             start = time()
             mf.kernel(init_guess='atom')
             end = time()
@@ -207,6 +207,8 @@ if __name__ == '__main__':
             f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
             f.write(f'{np.sum(mask)}\t{len(mask)}\n')
 
-
+            print(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t', end='')
+            print(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
+            print(f'{np.sum(mask)}\t{len(mask)}\n')
 
 
