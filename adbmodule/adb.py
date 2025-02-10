@@ -700,6 +700,7 @@ def create_shell_separated_mol(mol, verbose=0):
     cmol = gto.M(
         atom=mol.atom, basis=shell_sep_basis,
         charge=mol.charge, spin=mol.spin, unit=mol.unit,
+        ecp=mol.ecp,
         verbose=0)
     return cmol
 
@@ -848,6 +849,7 @@ def atomic_block_minimal_basis(
     by_shell=True,
     get_mask_history=True,
     link_shells=False,
+    verbose=True,
 ):
     """Create minimal basis from atomic block decomposition.
     """
@@ -869,6 +871,7 @@ def atomic_block_minimal_basis(
     nfuncs_min_tot = 0
     for i,funcs_and_atom in enumerate(zip(func_per_atom, atoms)):
         funcs, atom = funcs_and_atom
+        print(f'{atom=}')
         if by_shell:
             smask_atom = list(filter(lambda x: x[3][0] == i, smask))
         mask = np.zeros(mol.nao, dtype=bool)
@@ -877,7 +880,8 @@ def atomic_block_minimal_basis(
         mask[func_offset:func_offset+funcs] = True
         S_atom = mask_matrix(S, mask)
         F_atom = mask_matrix(F, mask)
-        nfunc_per_minimal_atom = int(np.ceil(ELEMENTS.index(atom) / 2))
+        nfunc_per_minimal_atom = int(np.ceil(
+            (ELEMENTS.index(atom)-mol.atom_nelec_core(i)) / 2))
         nfuncs_min_tot += nfunc_per_minimal_atom
         
         # TODO: fix the shell array (currently for whole mol, not just atomic block)
@@ -889,17 +893,19 @@ def atomic_block_minimal_basis(
 
         def number_of_states(energies, thresh=1e-3):
             nfuncs_include = nfunc_per_minimal_atom
-            while energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
+            while nfuncs_include < funcs \
+            and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
                 nfuncs_include += 1
             #print(f'{energies=} {nfuncs_include=} {energies[nfuncs_include+1]-energies[nfunc_per_minimal_atom]=}')
             return nfuncs_include
 
         # print(f'{nfunc_per_minimal_atom=}')
-        print(f'{e_atom=}') # TODO: Tidy up the print
-        # print only bound states, up to some reasonable number
-        print(f'Energy of highest orbital {e_atom[number_of_states(e_atom)-1]*27.2114} eV')
+        if verbose:
+            with np.printoptions(precision=2, suppress=True):
+                print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
 
         if restricted:
+            print(f'Energy of highest orbital {e_atom[number_of_states(e_atom)-1]*27.2114} eV')
             occs = np.zeros(c_atom.shape[1])
             occs[:number_of_states(e_atom)] = 2
             Qlim = 2*number_of_states(e_atom)
@@ -909,6 +915,8 @@ def atomic_block_minimal_basis(
                 np.einsum('ik,kj,lj->il', c_atom, np.diag(occs), c_atom.conj())
             )
         else:
+            print(f'Energy of highest alpha orbital {e_atom[0, number_of_states(e_atom[0])-1]*27.2114} eV')
+            print(f'Energy of highest beta  orbital {e_atom[1, number_of_states(e_atom[1])-1]*27.2114} eV')
             occs = np.zeros((2, c_atom.shape[2]))
             occs[0, :number_of_states(e_atom[0])] = 1
             occs[1, :number_of_states(e_atom[1])] = 1

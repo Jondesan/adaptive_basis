@@ -58,14 +58,26 @@ def get_molecules_in_dir(
             else:
                 charge = 0
                 spin = None
-            mol = gto.M(
-                atom=fn,
-                basis=bs,
-                charge=charge,
-                spin=spin,
-                unit=unit,
-                verbose=0,
-            )
+            try:
+                mol = gto.M(
+                    atom=fn,
+                    basis=bs,
+                    ecp=bs,
+                    charge=charge,
+                    spin=spin,
+                    unit=unit,
+                    verbose=0,
+                )
+            except:
+                print('running except...')
+                mol = gto.M(
+                    atom=fn,
+                    basis=bs,
+                    charge=charge,
+                    spin=spin,
+                    unit=unit,
+                    verbose=0,
+                )
             mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
             smask = adb.init_smask(mol)
             molecules.append(
@@ -142,6 +154,9 @@ if __name__ == '__main__':
     verbose = args.verbose
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
+    
+    # print(f'\n{mols[264]=}')
+    # print(f'{mols[265]=}')
     with open(output, 'w') as f:
         for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
             xcfunc = 'PBE'
