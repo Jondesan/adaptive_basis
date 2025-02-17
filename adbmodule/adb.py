@@ -641,7 +641,7 @@ def get_sub_scf_attributes(
     overlap,
     dft=False,
     xc='b3lyp',
-    grid_level=3
+    grid_level=7
     ):
     """Calculates converged attributes for the system.
 
@@ -670,7 +670,7 @@ def get_sub_scf_attributes(
     mf = mf.apply(scf.addons.remove_linear_dep_)
     if dft:
         mf = mf.to_ks(xc=xc)
-        mf.grids.level = grid_level # FIXME
+        mf.grids.level = grid_level
         mf.grids.prune = None
 
     # Diagonalize fock matrix and form guess density matrix
@@ -845,7 +845,7 @@ def atomic_block_minimal_basis(
     mol,
     F,
     S,
-    Q_tol=.5,
+    Q_tol=1,
     by_shell=True,
     get_mask_history=True,
     link_shells=False,
@@ -887,7 +887,7 @@ def atomic_block_minimal_basis(
         # TODO: fix the shell array (currently for whole mol, not just atomic block)
         F_ave = F_atom.copy()
         #smask_atom = [sm for sm in smask if sm[3][0] == i]
-        #F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
+        F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
 
         e_atom, c_atom = eigh(F_ave, S_atom.copy())
 
