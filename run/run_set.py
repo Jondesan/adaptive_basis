@@ -173,6 +173,7 @@ if __name__ == '__main__':
             mf.kernel(init_guess='atom')
             end = time()
             fullbasis_time = end - start
+            fullbasis_converged = mf.converged
 
             fullbasis_energy = mf.e_tot
 
@@ -186,6 +187,7 @@ if __name__ == '__main__':
                 return_mask_history=True,
                 nfunc_normalisation=normalisation,
                 abd_Q_tol=q_tol,
+                dft=run_dft, xc=xcfunc, grid_level=grid_level,
                 verbose=verbose,
             )
             end = time()
@@ -202,6 +204,7 @@ if __name__ == '__main__':
             mask = [sm[0] for sm in smaskhistory[-1][0]]
             newbas = mol._bas[mask]
             subbasis_mol._bas = newbas
+
             submf = dft.KS(subbasis_mol) if run_dft else scf.HF(subbasis_mol) 
             if run_dft:
                 submf.grids.level = grid_level
@@ -218,7 +221,8 @@ if __name__ == '__main__':
 
             # mask = adb.smask_to_mask(smaskhistory[-1][0])
             # start = time()
-            # submf.kernel(init_guess='atom')
+            submf.kernel(init_guess='atom')
+            subbasis_converged = submf.converged
             # dm0 = submf.make_rdm1()
             # initdm = np.zeros_like(S)
 
@@ -229,15 +233,21 @@ if __name__ == '__main__':
             # end = time()
 
             # subinit_time = end - start
+            # extracted_basis = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
+            # adb.basis_to_file_nwchem(extracted_basis, 'test_basis.nw', commentstring='Test basis for the atomic block decomp initialized algorithm.')
+
 
             func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
+            diff = data_sbys[-1][3] - fullbasis_energy
             f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t')
-            f.write(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
-            f.write(f'{np.sum(func_mask)}\t{len(func_mask)}\n')
+            f.write(f'{diff:.8f}\t{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
+            f.write(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
+            f.write(f'{fullbasis_converged}\t{subbasis_converged}\n')
             f.flush()
 
             print(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t', end='')
-            print(f'{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
-            print(f'{np.sum(func_mask)}\t{len(func_mask)}\n')
+            print(f'{diff:.8f}\t', end='')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
+            print(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
+            print(f'{fullbasis_converged}\t{subbasis_converged}\n')
 
 
