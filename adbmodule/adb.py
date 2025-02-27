@@ -95,8 +95,8 @@ def extract_basis(smask, shellsep_mol):
     if len(smask) != len(shellsep_mol._bas):
         raise ValueError(
             "Shell mask does not match with _bas attribute!"
-            + "Make sure the shellsep_mol objects shells have been separated"
-            + "using the create_shell_separated_mol method."
+            + " Make sure the shellsep_mol objects shells have been separated"
+            + " using the create_shell_separated_mol method."
         )
 
     atom_id = shellsep_mol._atm[:, 0]
@@ -462,10 +462,10 @@ def expand_mask(
     nfunc_normalisation=True,
     dft=False,
     xc='b3lyp',
-    grid_level=3,
+    grid_level=7,
     mol_obj=None
 ):
-    """Expands the current mask by either one function or one shell
+    r"""Expands the current mask by either one function or one shell
     based on smask.
 
     Args:
@@ -1007,13 +1007,13 @@ def find_subspace(
     dm0=None,
     dft=False,
     xc='b3lyp',
-    grid_level=3,
+    grid_level=7,
     return_mask_history=False,
     mask_cutoff=None,
     abd_initialization=True,
     abd_Q_tol=.5,
 ):
-    """Looks for a Fock matrix subspace that approximately solves the
+    r"""Looks for a Fock matrix subspace that approximately solves the
     Roothaan equation FC=SCE below a convergence of conv_tol.
 
     Args:
@@ -1091,7 +1091,9 @@ def find_subspace(
     fullbasis_mol = create_shell_separated_mol(mol)
     if dft:
         scf_obj_copy.to_ks()
-        scf_obj_copy.grid.level = grid_level
+        scf_obj_copy.xc = xc
+        scf_obj_copy.grids.level = grid_level
+        scf_obj_copy.grids.prune = None
     F = scf_obj_copy.get_fock(dm=dm0)
     # mask or smask initialization
     RHF = len(F.shape) == 2
@@ -1201,7 +1203,7 @@ def mask_analysis(
     link_shells=True,
     dft=False,
     xc='b3lyp',
-    grid_level=3,
+    grid_level=7,
     ):
     """Run mask analysis.
 
