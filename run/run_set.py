@@ -169,17 +169,20 @@ if __name__ == '__main__':
                 mf.xc = xcfunc
                 mf.grids.prune = None
             
+            # This produces the SAD density matrix
+            dm0 = mf.get_init_guess(key='atom')
+            # we need the corresponding Fock matrix
+            F = mf.get_fock(dm=dm0)
+            S = mf.get_ovlp()
+            mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
+
             start = time()
-            mf.kernel(init_guess='atom')
+            mf.kernel(init_guess=None)
             end = time()
             fullbasis_time = end - start
             fullbasis_converged = mf.converged
-
             fullbasis_energy = mf.e_tot
-
-            dm0 = mf.get_init_guess(key=mf.init_guess)
-            S = mf.get_ovlp()
-            F = mf.get_fock(dm=dm0)
+            
             start = time()
             smaskhistory = adb.find_subspace(
                 F, S, mol, mf, conv_tol=conv_tol,
