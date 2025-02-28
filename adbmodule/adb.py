@@ -1004,7 +1004,6 @@ def find_subspace(
     variant='enocc',
     link_shells=True,
     nfunc_normalisation=True,
-    dm0=None,
     dft=False,
     xc='b3lyp',
     grid_level=7,
@@ -1052,9 +1051,6 @@ def find_subspace(
             Whether to normalise the criteria with the number of added
             functions.
             Optional, deault is True
-        dm0 : ndarray
-            Initial guess density matrix. Can be used to test different
-            intial guesses and their convergence with ABS method.
         dft : bool
             Hartree-Fock or DFT.
             Optional, default is False
@@ -1094,7 +1090,6 @@ def find_subspace(
         scf_obj_copy.xc = xc
         scf_obj_copy.grids.level = grid_level
         scf_obj_copy.grids.prune = None
-    F = scf_obj_copy.get_fock(dm=dm0)
     # mask or smask initialization
     RHF = len(F.shape) == 2
     if RHF:
@@ -1306,14 +1301,14 @@ def mask_analysis(
             submf = scf.HF(subbasis_mol)
 
             mask = smask_to_mask(smask, fullbasis_mol.cart)
-            maskedConvF = mask_matrix(fock, mask, RHF)
+            maskedF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
             maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
             if not np.allclose(maskedS, submf.get_ovlp()) or not np.allclose(maskedHcore, submf.get_hcore()):
                 raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
             if True:
                 scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                    subbasis_mol, maskedConvF, maskedS,
+                    subbasis_mol, maskedF, maskedS,
                     dft=dft, xc=xc, grid_level=grid_level
                 )
                 Q_sqrd= get_q_sqrd(
