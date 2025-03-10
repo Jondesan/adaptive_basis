@@ -176,12 +176,6 @@ if __name__ == '__main__':
             S = mf.get_ovlp()
             mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
 
-            start = time()
-            mf.kernel(init_guess=None)
-            end = time()
-            fullbasis_time = end - start
-            fullbasis_converged = mf.converged
-            fullbasis_energy = mf.e_tot
             
             start = time()
             smaskhistory = adb.find_subspace(
@@ -196,6 +190,21 @@ if __name__ == '__main__':
             end = time()
             subbasis_time = end - start
 
+            subbasis_mol = adb.create_shell_separated_mol(mol)
+            adb.tk_debugger(smaskhistory[-1][0])
+            extracted_basis, ecp_bas = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
+            adb.basis_to_file_nwchem(
+                extracted_basis, f'{molfilename}_output_basis.nw', ecp_basis=ecp_bas,
+                commentstring='Test basis for the atomic block decomp initialized algorithm.')
+            print('Created the subbasis, output to file', f'{molfilename}_output_basis.nw')
+            
+            start = time()
+            mf.kernel(init_guess=None)
+            end = time()
+            fullbasis_time = end - start
+            fullbasis_converged = mf.converged
+            fullbasis_energy = mf.e_tot
+
             data_sbys = adb.mask_analysis(
                 smaskhistory, mol, mf,
                 F, S, verbose=verbose,
@@ -203,7 +212,6 @@ if __name__ == '__main__':
             )
             # print(f'{data_sbys=}')
 
-            subbasis_mol = adb.create_shell_separated_mol(mol)
             mask = [sm[0] for sm in smaskhistory[-1][0]]
             newbas = mol._bas[mask]
             subbasis_mol._bas = newbas
@@ -236,8 +244,6 @@ if __name__ == '__main__':
             # end = time()
 
             # subinit_time = end - start
-            # extracted_basis = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
-            # adb.basis_to_file_nwchem(extracted_basis, 'test_basis.nw', commentstring='Test basis for the atomic block decomp initialized algorithm.')
 
 
             func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
