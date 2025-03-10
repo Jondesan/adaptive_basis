@@ -4,7 +4,8 @@
 import numpy as np
 from scipy import linalg
 from itertools import count
-from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem, to_general_contraction
+from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem,\
+    to_general_contraction, convert_ecp_to_nwchem
 from pyscf.gto.ecp import core_configuration
 from pyscf.data.elements import _std_symbol, ELEMENTS
 from pyscf.gto.basis.parse_nwchem import load
@@ -32,6 +33,13 @@ NFUNCS = {
     'I': 13,
     'J': 15,
 }
+
+def tk_debugger(*vars):
+    print('######## TEEKKARIN DEBUGGER #############################')
+    for var in vars:
+        print(var, end=' ')
+    print()
+    print('######## TEEKKARIN DEBUGGER END #########################')
 
 def eigh(h, s):
     """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
@@ -90,6 +98,9 @@ def extract_basis(smask, shellsep_mol):
         basis : dict
             the masked basis of the molecule as a dictionary according
             pySCF format.
+        ecp_basis : none | dict
+            the ECP basis dictionary if present in the full basis of
+            shellsep_mol. Otherwise returns None.
     """
 
     if len(smask) != len(shellsep_mol._bas):
@@ -99,8 +110,7 @@ def extract_basis(smask, shellsep_mol):
             + " using the create_shell_separated_mol method."
         )
 
-    atom_id = shellsep_mol._atm[:, 0]
-    asymb = [ELEMENTS[i] for i in list(atom_id)]
+    asymb = list(shellsep_mol._basis.keys())
 
     basis = dict.fromkeys(asymb)
 
@@ -118,8 +128,9 @@ def extract_basis(smask, shellsep_mol):
         duplicate_removed_smask.append(elem)
 
     duplicate_removed_smask = np.array(duplicate_removed_smask)
+    tk_debugger(duplicate_removed_smask)
     # Initialize distinct atoms' dictionary formatted basis structures
-    # with angular momentum l
+    # with angular momentum angl
     for angl, shl in duplicate_removed_smask[:, [2, 3]]:
         if basis[shl[1]] is None:
             basis[shl[1]] = []
@@ -127,14 +138,13 @@ def extract_basis(smask, shellsep_mol):
             basis[shl[1]].append([angl])
 
     # Append exponents and contraction coefficients
-    for key in basis.keys():
-        ogbas = to_general_contraction(
-            shellsep_mol._basis[key]
-        )
+    for key in asymb:#basis.keys():
+        ogbas = to_general_contraction(shellsep_mol._basis[key])
         for shell in basis[key]:
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
-            idxs = [idx[3][2] - idx[2] for idx in key_smask if idx[2] == i]
+            idxs = [idx[3][4] - idx[2] for idx in key_smask if idx[2] == i]
+            tk_debugger(key, ogbas[i], i, shell, idxs)
             coeff_table = np.asarray(ogbas[i][1:], dtype=float)[:, [0] + idxs]
             # Remove rows and columns with all 0 contraction coeffs
             filtered_shell = coeff_table[
@@ -145,12 +155,14 @@ def extract_basis(smask, shellsep_mol):
                 basis[key].pop(i)
             else:
                 shell.extend(filtered_shell.tolist())
-    return basis
+    ecp = shellsep_mol._ecp if shellsep_mol._ecp != {} else None
+    return basis, ecp
 
 
 def basis_to_file_nwchem(
     basis,
     fn,
+    ecp_basis=None,
     commentstring="",
     bsname="ao basis",
     cart=False,
@@ -176,15 +188,24 @@ def basis_to_file_nwchem(
     sph_cart = "cartesian" if cart else "spherical"
     with open(fn, "w") as f:
         if len(commentstring) != 0:
-            f.write(f"{commentstring}\n\n")
+            for commentline in commentstring.split('#'):
+                f.write(f"#{commentline}\n")
+            f.write("\n")
         f.write(f'BASIS "{bsname}" {sph_cart} {print_noprint} ')
         f.write(f"{additional_labels}\n")
 
-        for asymb in basis.keys():
-            bs_atom = convert_basis_to_nwchem(asymb, basis[asymb])
-            f.write(f"{bs_atom}\n")
-
+        for asymb, atom_basis in basis.items():
+            bs_atom_nwchem = convert_basis_to_nwchem(asymb, atom_basis)
+            f.write(f"{bs_atom_nwchem}\n")
         f.write("END")
+
+        if ecp_basis is not None:
+            f.write('\n\n\nECP\n')
+            for asymb, atom_ecp in ecp_basis.items():
+                ecp_atom_nwchem = convert_ecp_to_nwchem(asymb, atom_ecp)
+                f.write(ecp_atom_nwchem)
+                f.write('\n')
+            f.write("END")
 
     return
 
@@ -302,12 +323,9 @@ def init_smask(mol, cart=False):
 
     count = np.zeros((mol.natm, 9), dtype=int)
     for ib in range(mol.nbas):
-        # atom that given basis function sits on
-        ia = mol.bas_atom(ib)
-        # angular momentum angl of given basis function
-        angl = mol.bas_angular(ib)
-        # number of CGTOs for given shell
-        nc = mol.bas_nctr(ib)
+        ia = mol.bas_atom(ib)       # atom that given basis function sits on
+        angl = mol.bas_angular(ib)  # angular momentum angl of given basis function
+        nc = mol.bas_nctr(ib)       # number of CGTOs for given shell
         symb = mol.atom_symbol(ia)  # label of given atom
         nelec_ecp = mol.atom_nelec_core(ia)  # Number of ecp electrons
         if nelec_ecp == 0 or angl > 3:
@@ -317,12 +335,16 @@ def init_smask(mol, cart=False):
             shl_start = coreshl[angl] + count[ia, angl] + angl + 1
         count[ia, angl] += nc
         for n in range(shl_start, shl_start + nc):
+            if nelec_ecp == 0 or angl > 3:
+                n_remove_ecp = n
+            else:
+                n_remove_ecp = n - coreshl[angl]
             smask.append(
                 [
                     False,
                     (angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1,
                     angl,
-                    (ia, symb, n, lib.param.ANGULAR[angl].capitalize()),
+                    (ia, symb, n, lib.param.ANGULAR[angl].capitalize(), n_remove_ecp),
                 ]
             )
 
@@ -1244,7 +1266,7 @@ def mask_analysis(
     RHF = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
 
-        #init_method = mask_history[0][3]
+    #init_method = mask_history[0][3]
     initialized = False
     dataframe = []
     last_mask = [False] * fullbasis_mol.nao_nr()
