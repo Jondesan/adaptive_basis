@@ -93,56 +93,7 @@ def get_molecules_in_dir(
     return molecules
 
 
-if __name__ == '__main__':
-
-    parser = argparse.ArgumentParser(
-        description="Run adaptive basis Hartree-Fock calculations for given set."
-    )
-    parser.add_argument(
-        "--mpath", type=str, required=True, nargs='+',
-        help="path to molecule directory"
-    )
-    parser.add_argument(
-        "--basis", type=str, required=False, default='def2-TZVP', nargs='+',
-        help="path to molecule directory"
-    )
-    parser.add_argument(
-        "--unit", type=str, required=False, default='Angstrom',
-        choices=['Angstrom', 'Bohr'],
-        help="units of the xyz files"
-    )
-    parser.add_argument(
-        "--conv_tol", type=float, required=False, default=1e-1,
-        help="convergence tolerance, default 1e-1"
-    )
-    parser.add_argument(
-        "--q_tol", type=float, required=False, default=.5,
-        help="charge tolerance, default .5"
-    )
-    parser.add_argument(
-        "--normalisation", type=int, required=False, default=1,
-        choices=[0,1],
-        help="whether to use normalisation"
-    )
-    parser.add_argument(
-        "--output", type=str, required=False, default='output.out',
-        help="name of output file"
-    )
-    parser.add_argument(
-        "--dft",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Whether to use DFT, optional. Default is True.",
-    )
-    parser.add_argument(
-        "--verbose",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Whether output is robust or not, optional. Default is True.",
-    )
-
-    args = parser.parse_args()
-    
+def run_wa_set(args):
     mpath = args.mpath
     basis = args.basis
     units = args.unit
@@ -258,5 +209,89 @@ if __name__ == '__main__':
             print(f'{diff:.8f}\t', end='')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
             print(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
             print(f'{fullbasis_converged}\t{subbasis_converged}\n')
+
+
+def run_multiplicities(args):
+    mpath = args.mpath
+    basis = args.basis
+    units = args.unit
+    conv_tol = args.conv_tol
+    q_tol = args.q_tol
+    normalisation = args.normalisation
+    output = args.output
+    run_dft = args.dft
+    verbose = args.verbose
+
+    mols = get_molecules_in_dir(mpath, basis, unit=units)
+
+    print('Molecule_filename', '2S', 'converged', 'e_tot')
+    for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
+        for spin in [0,1,2]:
+            mol.spin = spin
+            # mf = mol.KS()
+            # mf.grids.level = 7
+            # mf.xc = 'PBE'
+            # mf.grids.prune = None
+            mf = mol.HF()
+            mf.init_guess = 'atom'
+            try:
+                mf.kernel()
+                print(molfilename.split('/')[-1], spin, mf.converged, mf.e_tot)
+            except:
+                print(molfilename.split('/')[-1], spin, 'inconsistent', '-')
+
+
+if __name__ == '__main__':
+
+    parser = argparse.ArgumentParser(
+        description="Run adaptive basis Hartree-Fock calculations for given set."
+    )
+    parser.add_argument(
+        "--mpath", type=str, required=True, nargs='+',
+        help="path to molecule directory"
+    )
+    parser.add_argument(
+        "--basis", type=str, required=False, default='def2-TZVP', nargs='+',
+        help="path to molecule directory"
+    )
+    parser.add_argument(
+        "--unit", type=str, required=False, default='Angstrom',
+        choices=['Angstrom', 'Bohr'],
+        help="units of the xyz files"
+    )
+    parser.add_argument(
+        "--conv_tol", type=float, required=False, default=1e-1,
+        help="convergence tolerance, default 1e-1"
+    )
+    parser.add_argument(
+        "--q_tol", type=float, required=False, default=.5,
+        help="charge tolerance, default .5"
+    )
+    parser.add_argument(
+        "--normalisation", type=int, required=False, default=1,
+        choices=[0,1],
+        help="whether to use normalisation"
+    )
+    parser.add_argument(
+        "--output", type=str, required=False, default='output.out',
+        help="name of output file"
+    )
+    parser.add_argument(
+        "--dft",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to use DFT, optional. Default is True.",
+    )
+    parser.add_argument(
+        "--verbose",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether output is robust or not, optional. Default is True.",
+    )
+
+    args = parser.parse_args()
+    
+    #run_wa_set(args)
+    run_multiplicities(args)
 
 
