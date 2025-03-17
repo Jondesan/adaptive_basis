@@ -55,9 +55,13 @@ def get_molecules_in_dir(
                 charge = charge[0] if len(charge) != 0 else 0
                 spin = [int(substring.replace('spin','')) for substring in fnparts if 'spin' in substring]
                 spin = spin[0] if len(spin) != 0 else None
+                # Parse initial guess
+                ig = [substring.replace('init_','') for substring in fnparts if 'init_' in substring]
+                ig = ig[0] if len(ig) != 0 else 'atom'
             else:
                 charge = 0
                 spin = None
+                ig = 'atom'
             try:
                 mol = gto.M(
                     atom=fn,
@@ -68,6 +72,7 @@ def get_molecules_in_dir(
                     unit=unit,
                     verbose=0,
                 )
+                print(mol.unit)
             except:
                 print('running except...')
                 mol = gto.M(
@@ -81,7 +86,7 @@ def get_molecules_in_dir(
             mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
             smask = adb.init_smask(mol)
             molecules.append(
-                [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None, bs]
+                [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, ig, bs]
             )
 
     # Sort by number of electrons, then by the basis, then by number of basis fcts
@@ -113,15 +118,17 @@ def run_wa_set(args):
             xcfunc = 'PBE'
             grid_level = 7
 
-            # mf = dft.RKS(mol) if run_dft else scf.RHF(mol)
             mf = dft.KS(mol) if run_dft else scf.HF(mol)
             if run_dft:
                 mf.grids.level = grid_level
                 mf.xc = xcfunc
                 mf.grids.prune = None
             
+            # Initialize init guess method
+            mf.init_guess = init_guess
+
             # This produces the SAD density matrix
-            dm0 = mf.get_init_guess(key='atom')
+            dm0 = mf.get_init_guess(key='sap')
             # we need the corresponding Fock matrix
             F = mf.get_fock(dm=dm0)
             S = mf.get_ovlp()
@@ -150,7 +157,7 @@ def run_wa_set(args):
             print('Created the subbasis, output to file', f'{molfilename}_output_basis.nw')
             
             start = time()
-            mf.kernel(init_guess=None)
+            mf.kernel(init_guess=init_guess)
             end = time()
             fullbasis_time = end - start
             fullbasis_converged = mf.converged
@@ -208,7 +215,7 @@ def run_wa_set(args):
             print(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t', end='')
             print(f'{diff:.8f}\t', end='')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
             print(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
-            print(f'{fullbasis_converged}\t{subbasis_converged}\n')
+            print(f'{fullbasis_converged}\t{subbasis_converged}\n', flush=True)
 
 
 def run_multiplicities(args):
@@ -226,20 +233,23 @@ def run_multiplicities(args):
 
     print('Molecule_filename', '2S', 'converged', 'e_tot')
     for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
-        for spin in [0,1,2]:
+        # for spin in [6,7,8]:
+        for spin in [0,1,2,3,4,5]:
             mol.spin = spin
-            # mf = mol.KS()
-            # mf.grids.level = 7
-            # mf.xc = 'PBE'
-            # mf.grids.prune = None
-            mf = mol.HF()
-            mf.init_guess = 'atom'
+            if run_dft:
+                mol.verbose = 4
+                mf = mol.KS()
+                mf.grids.level = 7
+                mf.xc = 'PBE'
+                mf.grids.prune = None
+            else:
+                mf = mol.HF()
+            mf.init_guess = 'sap'
             try:
                 mf.kernel()
-                print(molfilename.split('/')[-1], spin, mf.converged, mf.e_tot)
+                print(molfilename.split('/')[-1], spin, mf.converged, mf.e_tot, flush=True)
             except:
-                print(molfilename.split('/')[-1], spin, 'inconsistent', '-')
-
+                print(molfilename.split('/')[-1], spin, 'inconsistent', '-', flush=True)
 
 if __name__ == '__main__':
 
