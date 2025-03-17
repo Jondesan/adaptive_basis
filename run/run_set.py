@@ -113,7 +113,7 @@ def run_wa_set(args):
     
     # print(f'\n{mols[264]=}')
     # print(f'{mols[265]=}')
-    with open(output, 'w') as f:
+    with open(output, 'w', buffering=1) as f:
         for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
             xcfunc = 'PBE'
             grid_level = 7
@@ -149,12 +149,12 @@ def run_wa_set(args):
             subbasis_time = end - start
 
             subbasis_mol = adb.create_shell_separated_mol(mol)
-            adb.tk_debugger(smaskhistory[-1][0])
-            extracted_basis, ecp_bas = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
-            adb.basis_to_file_nwchem(
-                extracted_basis, f'{molfilename}_output_basis.nw', ecp_basis=ecp_bas,
-                commentstring='Test basis for the atomic block decomp initialized algorithm.')
-            print('Created the subbasis, output to file', f'{molfilename}_output_basis.nw')
+            # adb.tk_debugger(smaskhistory[-1][0])
+            # extracted_basis, ecp_bas = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
+            # adb.basis_to_file_nwchem(
+            #     extracted_basis, f'{molfilename}_output_basis.nw', ecp_basis=ecp_bas,
+            #     commentstring='Test basis for the atomic block decomp initialized algorithm.')
+            # print('Created the subbasis, output to file', f'{molfilename}_output_basis.nw')
             
             start = time()
             mf.kernel(init_guess=init_guess)
@@ -190,7 +190,7 @@ def run_wa_set(args):
 
             # mask = adb.smask_to_mask(smaskhistory[-1][0])
             # start = time()
-            submf.kernel(init_guess='atom')
+            submf.kernel(init_guess=init_guess)
             subbasis_converged = submf.converged
             # dm0 = submf.make_rdm1()
             # initdm = np.zeros_like(S)
@@ -207,15 +207,15 @@ def run_wa_set(args):
             func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
             diff = data_sbys[-1][3] - fullbasis_energy
             f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t')
-            f.write(f'{diff:.8f}\t{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
+            f.write(f'{diff:.8f}\t', end='')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
             f.write(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
-            f.write(f'{fullbasis_converged}\t{subbasis_converged}\n')
-            f.flush()
+            f.write(f'{fullbasis_converged}\t{subbasis_converged}\t{init_guess}\n')
+            # f.flush()
 
             print(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t', end='')
             print(f'{diff:.8f}\t', end='')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
             print(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
-            print(f'{fullbasis_converged}\t{subbasis_converged}\n', flush=True)
+            print(f'{fullbasis_converged}\t{subbasis_converged}\t{init_guess}\n', flush=True)
 
 
 def run_multiplicities(args):
