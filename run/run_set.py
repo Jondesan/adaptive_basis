@@ -207,7 +207,7 @@ def run_wa_set(args):
             func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
             diff = data_sbys[-1][3] - fullbasis_energy
             f.write(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t')
-            f.write(f'{diff:.8f}\t', end='')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
+            f.write(f'{diff:.8f}\t')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
             f.write(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
             f.write(f'{fullbasis_converged}\t{subbasis_converged}\t{init_guess}\n')
             # f.flush()
@@ -301,7 +301,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
     
-    #run_wa_set(args)
-    run_multiplicities(args)
+    run_wa_set(args)
+    # run_multiplicities(args)
 
 
