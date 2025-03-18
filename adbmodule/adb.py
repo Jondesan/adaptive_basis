@@ -1172,7 +1172,7 @@ def find_subspace(
 
     subbasis_mol = create_shell_separated_mol(fullbasis_mol)
     basis_initialized = False
-    while True and not mask.all():
+    while True and not np.all(mask):
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
             hcore=scf_obj_copy.get_hcore(),
