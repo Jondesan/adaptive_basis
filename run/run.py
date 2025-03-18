@@ -219,7 +219,6 @@ def run_abs(
                             conv_tol=conv_tol,
                             collect_data=False,
                             variant=variant,
-                            dm0=dm0,
                             return_mask_history=True,
                             nfunc_normalisation=nfunc_normalisation
                         )
@@ -243,7 +242,6 @@ def run_abs(
                         variant=variant,
                         link_shells=lshells,
                         nfunc_normalisation=nfunc_normalisation,
-                        dm0=dm0,
                         return_mask_history=True
                     )
                     data_sbys = adb.mask_analysis(
