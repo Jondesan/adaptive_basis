@@ -152,9 +152,9 @@ def run_wa_set(args):
             # adb.tk_debugger(smaskhistory[-1][0])
             # extracted_basis, ecp_bas = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
             # adb.basis_to_file_nwchem(
-            #     extracted_basis, f'{molfilename}_output_basis.nw', ecp_basis=ecp_bas,
+            #     extracted_basis, f'{molfilename}_output_basis_new.nw', ecp_basis=ecp_bas,
             #     commentstring='Test basis for the atomic block decomp initialized algorithm.')
-            # print('Created the subbasis, output to file', f'{molfilename}_output_basis.nw')
+            # print('Created the subbasis, output to file', f'{molfilename}_output_basis_new.nw')
             
             start = time()
             mf.kernel(init_guess=init_guess)
@@ -210,7 +210,6 @@ def run_wa_set(args):
             f.write(f'{diff:.8f}\t')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t')#{subinit_time:.4f}\t')
             f.write(f'{np.sum(func_mask)}\t{len(func_mask)}\t')
             f.write(f'{fullbasis_converged}\t{subbasis_converged}\t{init_guess}\n')
-            # f.flush()
 
             print(f'{molfilename.split(".")[0]:20s}\t{fullbasis_energy:.20f}\t{data_sbys[-1][3]:.20f}\t', end='')
             print(f'{diff:.8f}\t', end='')#{subbasis_time:.4f}\t{fullbasis_time:.4f}\t', end='')#{subinit_time:.4f}\t')
