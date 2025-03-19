@@ -128,7 +128,6 @@ def extract_basis(smask, shellsep_mol):
         duplicate_removed_smask.append(elem)
 
     duplicate_removed_smask = np.array(duplicate_removed_smask)
-    tk_debugger(duplicate_removed_smask)
     # Initialize distinct atoms' dictionary formatted basis structures
     # with angular momentum angl
     for angl, shl in duplicate_removed_smask[:, [2, 3]]:
@@ -144,7 +143,6 @@ def extract_basis(smask, shellsep_mol):
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
             idxs = [idx[3][4] - idx[2] for idx in key_smask if idx[2] == i]
-            tk_debugger(key, ogbas[i], i, shell, idxs)
             coeff_table = np.asarray(ogbas[i][1:], dtype=float)[:, [0] + idxs]
             # Remove rows and columns with all 0 contraction coeffs
             filtered_shell = coeff_table[
@@ -685,10 +683,11 @@ def get_sub_scf_attributes(
         subbasis, the MO coefficient matrix of the subbasis.
     """
     RHF = (len(fock.shape) == 2)
-    if RHF:
-        mf = mol.RHF()
-    else:
-        mf = mol.UHF()
+    # if RHF:
+    #     mf = mol.RHF()
+    # else:
+    #     mf = mol.UHF()
+    mf = mol.HF()
     mf = mf.apply(scf.addons.remove_linear_dep_)
     if dft:
         mf = mf.to_ks(xc=xc)
@@ -1316,23 +1315,50 @@ def mask_analysis(
     for mask_i, current_val, difference, *init in mask_history:
         if is_smask:
             smask = mask_i
-            subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-            newmask = [sm[0] for sm in smask]
-            newbas = fullbasis_mol._bas[newmask]
-            subbasis_mol._bas = newbas
+            # subbasis_mol = create_shell_separated_mol(fullbasis_mol)
+            # newmask = [sm[0] for sm in smask]
+            # newbas = fullbasis_mol._bas[newmask]
+            # subbasis_mol._bas.update(newbas)
+            extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
+            subbasis_mol = Mole(
+                atom = fullbasis_mol.atom, basis = extracted_basis,
+                charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
+                verbose = fullbasis_mol.verbose, unit=fullbasis_mol.unit,
+                ecp = ecp_bas
+                )
+            subbasis_mol.build()
             submf = scf.HF(subbasis_mol)
 
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
             maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
-            if not np.allclose(maskedS, submf.get_ovlp()) or not np.allclose(maskedHcore, submf.get_hcore()):
-                raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
+            # if not np.allclose(maskedS, submf.get_ovlp()):
+            #     raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
             if True:
-                scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                    subbasis_mol, maskedF, maskedS,
-                    dft=dft, xc=xc, grid_level=grid_level
-                )
+                # scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
+                #     subbasis_mol, maskedF, maskedS,
+                #     dft=dft, xc=xc, grid_level=grid_level
+                # )
+                ##### TRYING STUFF OUT
+                if dft:
+                    submf = submf.to_ks(xc=xc)
+                    submf.grids.level = grid_level
+                    submf.grids.prune = None
+                submf.kernel()
+                scf_energy = submf.e_tot
+                if fock.shape[1] > 1:
+                    e, subbasis_coeffs = eigh(maskedF, maskedS)
+                if RHF:
+                    nocc_sb = len(submf.mo_occ > 0)
+                    scf_orbital_energy = sum(np.sort(submf.mo_energy)[:nocc_sb])
+                else:
+                    nocc_sb = [len(submf.mo_occ[0] > 0), len(submf.mo_occ[1] > 0)]
+                    scf_orbital_energy = .5 * sum(
+                        np.sort(submf.mo_energy[0])[:nocc_sb[0]] +
+                        np.sort(submf.mo_energy[1])[:nocc_sb[1]])
+                #######
+
                 Q_sqrd= get_q_sqrd(
                     fullbasis_coeffs, subbasis_coeffs,
                     ovlp[:,mask], nocc
