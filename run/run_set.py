@@ -128,7 +128,7 @@ def run_wa_set(args):
             mf.init_guess = init_guess
 
             # This produces the SAD density matrix
-            dm0 = mf.get_init_guess(key='sap')
+            dm0 = mf.get_init_guess(key=init_guess)
             # we need the corresponding Fock matrix
             F = mf.get_fock(dm=dm0)
             S = mf.get_ovlp()
@@ -157,7 +157,7 @@ def run_wa_set(args):
             # print('Created the subbasis, output to file', f'{molfilename}_output_basis_new.nw')
             
             start = time()
-            mf.kernel(init_guess=init_guess)
+            mf.kernel(dm0=dm0)
             end = time()
             fullbasis_time = end - start
             fullbasis_converged = mf.converged
@@ -190,7 +190,7 @@ def run_wa_set(args):
 
             # mask = adb.smask_to_mask(smaskhistory[-1][0])
             # start = time()
-            submf.kernel(init_guess=init_guess)
+            submf.kernel(dm0=adb.mask_matrix(dm0, mask))
             subbasis_converged = submf.converged
             # dm0 = submf.make_rdm1()
             # initdm = np.zeros_like(S)
