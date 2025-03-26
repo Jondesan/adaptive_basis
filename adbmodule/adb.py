@@ -1220,6 +1220,7 @@ def mask_analysis(
     dft=False,
     xc='b3lyp',
     grid_level=7,
+    dm0=None,
     ):
     """Run mask analysis.
 
@@ -1252,6 +1253,8 @@ def mask_analysis(
         grid_level : int
             predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
             Optional, default is 3.
+        dm0 : numpy.ndarray
+            The initial guess density matrix
 
     Return:
         dataframe : array
@@ -1262,6 +1265,8 @@ def mask_analysis(
     """
     scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
+    if dm0 is None:
+        dm0 = scf_obj_copy.get_init_guess(key=scf_obj_copy.init_guess)
     RHF = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
 
@@ -1328,7 +1333,7 @@ def mask_analysis(
                 )
             subbasis_mol.build()
             submf = scf.HF(subbasis_mol)
-
+            
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
@@ -1345,7 +1350,7 @@ def mask_analysis(
                     submf = submf.to_ks(xc=xc)
                     submf.grids.level = grid_level
                     submf.grids.prune = None
-                submf.kernel(dump_chk=False)
+                submf.kernel(dump_chk=False, dm0=mask_matrix(dm0, mask))
                 scf_energy = submf.e_tot
                 if fock.shape[1] > 1:
                     e, subbasis_coeffs = eigh(maskedF, maskedS)
