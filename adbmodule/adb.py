@@ -700,7 +700,7 @@ def get_sub_scf_attributes(
         occ = mf.get_occ(e, c)
         dm = mf.make_rdm1(c, occ)
         mf.init_guess = dm
-    mf.kernel()
+    mf.kernel(dump_chk=False)
 
     scf_energy = mf.e_tot
     if RHF:
@@ -1345,7 +1345,7 @@ def mask_analysis(
                     submf = submf.to_ks(xc=xc)
                     submf.grids.level = grid_level
                     submf.grids.prune = None
-                submf.kernel()
+                submf.kernel(dump_chk=False)
                 scf_energy = submf.e_tot
                 if fock.shape[1] > 1:
                     e, subbasis_coeffs = eigh(maskedF, maskedS)
