@@ -168,40 +168,34 @@ def run_wa_set(args):
                 F, S, verbose=verbose,
                 dft=run_dft, xc=xcfunc, grid_level=grid_level,
             )
-            # print(f'{data_sbys=}')
 
-            mask = [sm[0] for sm in smaskhistory[-1][0]]
-            newbas = mol._bas[mask]
-            subbasis_mol._bas = newbas
+            smask = smaskhistory[-1][0]
+            # Create subbasis mol object
+            extracted_basis, ecp_bas = adb.extract_basis(smask, adb.create_shell_separated_mol(mol))
+            subbasis_mol = gto.M(
+                atom = mol.atom, basis = extracted_basis,
+                charge = mol.charge, spin = mol.spin,
+                verbose = mol.verbose, unit=mol.unit,
+                ecp = ecp_bas
+                )
+            # subbasis_mol.build()
 
             submf = dft.KS(subbasis_mol) if run_dft else scf.HF(subbasis_mol) 
             if run_dft:
                 submf.grids.level = grid_level
                 submf.xc = xcfunc
                 submf.grids.prune = None
-            # submf.init_guess = 'atom'
 
             mf = dft.KS(mol) if run_dft else scf.HF(mol)
             if run_dft:
                 mf.grids.level = grid_level
                 mf.xc = xcfunc
                 mf.grids.prune = None
-            # mf.init_guess = 'atom'
 
-            # mask = adb.smask_to_mask(smaskhistory[-1][0])
-            # start = time()
+            mask = adb.smask_to_mask(smaskhistory[-1][0])
             submf.kernel(dm0=adb.mask_matrix(dm0, mask))
             subbasis_converged = submf.converged
-            # dm0 = submf.make_rdm1()
-            # initdm = np.zeros_like(S)
 
-            # idx = np.where(mask)[0]
-            # for j,i in enumerate(idx):
-            #     initdm[i][idx] = dm0[j]
-            # mf.kernel(dm0=initdm, init_guess='atom')
-            # end = time()
-
-            # subinit_time = end - start
 
 
             func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
