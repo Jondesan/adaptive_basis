@@ -150,11 +150,11 @@ def run_wa_set(args):
 
             subbasis_mol = adb.create_shell_separated_mol(mol)
             # adb.tk_debugger(smaskhistory[-1][0])
-            # extracted_basis, ecp_bas = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
-            # adb.basis_to_file_nwchem(
-            #     extracted_basis, f'{molfilename}_output_basis_new.nw', ecp_basis=ecp_bas,
-            #     commentstring='Test basis for the atomic block decomp initialized algorithm.')
-            # print('Created the subbasis, output to file', f'{molfilename}_output_basis_new.nw')
+            extracted_basis, ecp_bas = adb.extract_basis(smaskhistory[-1][0], adb.create_shell_separated_mol(subbasis_mol))
+            adb.basis_to_file_nwchem(
+                extracted_basis, f'{molfilename}_output_basis_new.nw', ecp_basis=ecp_bas,
+                commentstring='Test basis for the atomic block decomp initialized algorithm.')
+            print('Created the subbasis, output to file', f'{molfilename}_output_basis_new.nw')
             
             start = time()
             mf.kernel(dm0=dm0)
