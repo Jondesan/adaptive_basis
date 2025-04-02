@@ -16,6 +16,7 @@ from pyscf import lib, gto, scf
 from warnings import warn
 from operator import itemgetter
 import copy
+import sys
 import re
 
 VARIANTS = [
@@ -546,7 +547,7 @@ def expand_mask(
     last_sum = get_iteration_criteria_value(
         variant, epsilon_i=evals, nocc=nocc,
         sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-        Cfull=Cfull, ovlp=maskedS)
+        Cfull=Cfull, ovlp=S[:, mask])
 
     test_sums = []    
     if smask is None:
@@ -703,6 +704,7 @@ def get_sub_scf_attributes(
     mf.kernel(dump_chk=False)
 
     scf_energy = mf.e_tot
+    # sum over occupied orbital energies
     if RHF:
         nocc_sb = len(mf.mo_occ > 0)
         scf_orbital_energy = sum(np.sort(mf.mo_energy)[:nocc_sb])
@@ -1371,6 +1373,9 @@ def mask_analysis(
             else:
                 scf_energy, scf_orbital_energy, subbasis_coeffs = 0.0, 0.0, 0.0
                 Q_sqrd = 0.0
+            
+            if not submf.converged:
+                print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
         else:
             mask = mask_i
             e, subbasis_coeffs = eigh(mask_matrix(fock, mask, RHF=RHF), mask_matrix(ovlp, mask))
@@ -1378,7 +1383,7 @@ def mask_analysis(
                 fullbasis_coeffs, subbasis_coeffs,
                 ovlp[:,mask], nocc
             )
-
+        
         if verbose:
             if is_smask:
                 changes = [i for i in range(len(smask)) if smask[i][0] != last_smask[i][0]]
