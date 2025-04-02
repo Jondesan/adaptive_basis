@@ -107,6 +107,7 @@ def run_wa_set(args):
     normalisation = args.normalisation
     output = args.output
     run_dft = args.dft
+    abd_init = args.abd_init
     verbose = args.verbose
 
     mols = get_molecules_in_dir(mpath, basis, unit=units)
@@ -141,7 +142,7 @@ def run_wa_set(args):
                 collect_data=False, get_smask=True,
                 return_mask_history=True,
                 nfunc_normalisation=normalisation,
-                abd_Q_tol=q_tol,
+                abd_Q_tol=q_tol, abd_initialization=abd_init,
                 dft=run_dft, xc=xcfunc, grid_level=grid_level,
                 verbose=verbose,
             )
@@ -284,6 +285,12 @@ if __name__ == '__main__':
         action=argparse.BooleanOptionalAction,
         default=True,
         help="Whether to use DFT, optional. Default is True.",
+    )
+    parser.add_argument(
+        "--abd_init",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Whether to initialise the subbasis with atomic block decomposition, optional. Default is True.",
     )
     parser.add_argument(
         "--verbose",
