@@ -140,6 +140,10 @@ def extract_basis(smask, shellsep_mol):
     # Append exponents and contraction coefficients
     for key in asymb:#basis.keys():
         ogbas = to_general_contraction(shellsep_mol._basis[key])
+        # Important when initialization does not put functions on all
+        # atoms in the molecule, would result in error
+        if basis[key] is None:
+            continue
         for shell in basis[key]:
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
@@ -1185,10 +1189,17 @@ def find_subspace(
         )
 
         if return_mask_history:
-            mask_history.append( (
-                copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-                current_criteria_val,
-                difference) )
+            if basis_initialized:
+                mask_history.append( (
+                    copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                    current_criteria_val,
+                    difference) )
+            else:
+                mask_history.append( (
+                    copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                    0.0,
+                    0.0,
+                    'Max element of Fock matrix') )
 
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
@@ -1318,7 +1329,7 @@ def mask_analysis(
         
         print_data_header()
 
-
+    
     for mask_i, current_val, difference, *init in mask_history:
         if is_smask:
             smask = mask_i
