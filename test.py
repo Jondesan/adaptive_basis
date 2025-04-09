@@ -4,7 +4,7 @@ import numpy as np
 
 if __name__ == '__main__':
     mol = pyscf.M(
-        atom='/home/joonahuh/uni/electronic_structure/benchmarks/pom_geom/weigend_ahlrichs/output/be2f4.xyz',
+        atom='be2f4.xyz',
         basis='def2-tzvp',
         # basis='321G',
         verbose=0)
