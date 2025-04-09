@@ -106,7 +106,8 @@ def run_abs(
     nfunc_normalisation=True,
     dft=False,
     xc='b3lyp',
-    grid_level=3
+    grid_level=7,
+    abd_init=False
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -219,9 +220,9 @@ def run_abs(
                             conv_tol=conv_tol,
                             collect_data=False,
                             variant=variant,
-                            dm0=dm0,
                             return_mask_history=True,
-                            nfunc_normalisation=nfunc_normalisation
+                            nfunc_normalisation=nfunc_normalisation,
+                            abd_initialization=abd_init
                         )
                         data_fbyf = adb.mask_analysis(
                             maskhistory, mol, myhf,
@@ -243,8 +244,8 @@ def run_abs(
                         variant=variant,
                         link_shells=lshells,
                         nfunc_normalisation=nfunc_normalisation,
-                        dm0=dm0,
-                        return_mask_history=True
+                        return_mask_history=True,
+                        abd_initialization=abd_init
                     )
                     data_sbys = adb.mask_analysis(
                         smaskhistory, mol, myhf,
@@ -338,6 +339,12 @@ if __name__ == "__main__":
         default=False,
         help="Whether to use DFT, optional. Default is False.",
     )
+    parser.add_argument(
+        "--abd",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Initialize with atomic block decomposition, optional. Default is False.",
+    )
 
     args = parser.parse_args()
 
@@ -353,6 +360,7 @@ if __name__ == "__main__":
     init_guesses = args.init_guesses
     dft = args.dft
     unit = args.unit
+    abd_init = args.abd
     bs = []
     bstemp = []
 
@@ -384,5 +392,5 @@ if __name__ == "__main__":
         conv_tol=conv_tol,
         sap_basis_sets=sapbasis,
         nfunc_normalisation=nfunc_norm,
-        dft=dft,
+        dft=dft, abd_init=abd_init
         )

@@ -4,7 +4,8 @@
 import numpy as np
 from scipy import linalg
 from itertools import count
-from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem, to_general_contraction
+from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem,\
+    to_general_contraction, convert_ecp_to_nwchem
 from pyscf.gto.ecp import core_configuration
 from pyscf.data.elements import _std_symbol, ELEMENTS
 from pyscf.gto.basis.parse_nwchem import load
@@ -15,6 +16,7 @@ from pyscf import lib, gto, scf
 from warnings import warn
 from operator import itemgetter
 import copy
+import sys
 import re
 
 VARIANTS = [
@@ -32,6 +34,13 @@ NFUNCS = {
     'I': 13,
     'J': 15,
 }
+
+def tk_debugger(*vars):
+    print('######## TEEKKARIN DEBUGGER #############################')
+    for var in vars:
+        print(var, end=' ')
+    print()
+    print('######## TEEKKARIN DEBUGGER END #########################')
 
 def eigh(h, s):
     """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
@@ -90,17 +99,19 @@ def extract_basis(smask, shellsep_mol):
         basis : dict
             the masked basis of the molecule as a dictionary according
             pySCF format.
+        ecp_basis : none | dict
+            the ECP basis dictionary if present in the full basis of
+            shellsep_mol. Otherwise returns None.
     """
 
     if len(smask) != len(shellsep_mol._bas):
         raise ValueError(
             "Shell mask does not match with _bas attribute!"
-            + "Make sure the shellsep_mol objects shells have been separated"
-            + "using the create_shell_separated_mol method."
+            + " Make sure the shellsep_mol objects shells have been separated"
+            + " using the create_shell_separated_mol method."
         )
 
-    atom_id = shellsep_mol._atm[:, 0]
-    asymb = [ELEMENTS[i] for i in list(atom_id)]
+    asymb = list(shellsep_mol._basis.keys())
 
     basis = dict.fromkeys(asymb)
 
@@ -119,7 +130,7 @@ def extract_basis(smask, shellsep_mol):
 
     duplicate_removed_smask = np.array(duplicate_removed_smask)
     # Initialize distinct atoms' dictionary formatted basis structures
-    # with angular momentum l
+    # with angular momentum angl
     for angl, shl in duplicate_removed_smask[:, [2, 3]]:
         if basis[shl[1]] is None:
             basis[shl[1]] = []
@@ -127,14 +138,16 @@ def extract_basis(smask, shellsep_mol):
             basis[shl[1]].append([angl])
 
     # Append exponents and contraction coefficients
-    for key in basis.keys():
-        ogbas = to_general_contraction(
-            shellsep_mol._basis[key]
-        )
+    for key in asymb:#basis.keys():
+        ogbas = to_general_contraction(shellsep_mol._basis[key])
+        # Important when initialization does not put functions on all
+        # atoms in the molecule, would result in error
+        if basis[key] is None:
+            continue
         for shell in basis[key]:
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
-            idxs = [idx[3][2] - idx[2] for idx in key_smask if idx[2] == i]
+            idxs = [idx[3][4] - idx[2] for idx in key_smask if idx[2] == i]
             coeff_table = np.asarray(ogbas[i][1:], dtype=float)[:, [0] + idxs]
             # Remove rows and columns with all 0 contraction coeffs
             filtered_shell = coeff_table[
@@ -145,12 +158,14 @@ def extract_basis(smask, shellsep_mol):
                 basis[key].pop(i)
             else:
                 shell.extend(filtered_shell.tolist())
-    return basis
+    ecp = shellsep_mol._ecp if shellsep_mol._ecp != {} else None
+    return basis, ecp
 
 
 def basis_to_file_nwchem(
     basis,
     fn,
+    ecp_basis=None,
     commentstring="",
     bsname="ao basis",
     cart=False,
@@ -176,15 +191,24 @@ def basis_to_file_nwchem(
     sph_cart = "cartesian" if cart else "spherical"
     with open(fn, "w") as f:
         if len(commentstring) != 0:
-            f.write(f"{commentstring}\n\n")
+            for commentline in commentstring.split('#'):
+                f.write(f"#{commentline}\n")
+            f.write("\n")
         f.write(f'BASIS "{bsname}" {sph_cart} {print_noprint} ')
         f.write(f"{additional_labels}\n")
 
-        for asymb in basis.keys():
-            bs_atom = convert_basis_to_nwchem(asymb, basis[asymb])
-            f.write(f"{bs_atom}\n")
-
+        for asymb, atom_basis in basis.items():
+            bs_atom_nwchem = convert_basis_to_nwchem(asymb, atom_basis)
+            f.write(f"{bs_atom_nwchem}\n")
         f.write("END")
+
+        if ecp_basis is not None:
+            f.write('\n\n\nECP\n')
+            for asymb, atom_ecp in ecp_basis.items():
+                ecp_atom_nwchem = convert_ecp_to_nwchem(asymb, atom_ecp)
+                f.write(ecp_atom_nwchem)
+                f.write('\n')
+            f.write("END")
 
     return
 
@@ -302,12 +326,9 @@ def init_smask(mol, cart=False):
 
     count = np.zeros((mol.natm, 9), dtype=int)
     for ib in range(mol.nbas):
-        # atom that given basis function sits on
-        ia = mol.bas_atom(ib)
-        # angular momentum angl of given basis function
-        angl = mol.bas_angular(ib)
-        # number of CGTOs for given shell
-        nc = mol.bas_nctr(ib)
+        ia = mol.bas_atom(ib)       # atom that given basis function sits on
+        angl = mol.bas_angular(ib)  # angular momentum angl of given basis function
+        nc = mol.bas_nctr(ib)       # number of CGTOs for given shell
         symb = mol.atom_symbol(ia)  # label of given atom
         nelec_ecp = mol.atom_nelec_core(ia)  # Number of ecp electrons
         if nelec_ecp == 0 or angl > 3:
@@ -317,12 +338,16 @@ def init_smask(mol, cart=False):
             shl_start = coreshl[angl] + count[ia, angl] + angl + 1
         count[ia, angl] += nc
         for n in range(shl_start, shl_start + nc):
+            if nelec_ecp == 0 or angl > 3:
+                n_remove_ecp = n
+            else:
+                n_remove_ecp = n - coreshl[angl]
             smask.append(
                 [
                     False,
                     (angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1,
                     angl,
-                    (ia, symb, n, lib.param.ANGULAR[angl].capitalize()),
+                    (ia, symb, n, lib.param.ANGULAR[angl].capitalize(), n_remove_ecp),
                 ]
             )
 
@@ -462,10 +487,10 @@ def expand_mask(
     nfunc_normalisation=True,
     dft=False,
     xc='b3lyp',
-    grid_level=3,
+    grid_level=7,
     mol_obj=None
 ):
-    """Expands the current mask by either one function or one shell
+    r"""Expands the current mask by either one function or one shell
     based on smask.
 
     Args:
@@ -526,7 +551,7 @@ def expand_mask(
     last_sum = get_iteration_criteria_value(
         variant, epsilon_i=evals, nocc=nocc,
         sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-        Cfull=Cfull, ovlp=maskedS)
+        Cfull=Cfull, ovlp=S[:, mask])
 
     test_sums = []    
     if smask is None:
@@ -556,7 +581,7 @@ def expand_mask(
         else:
             shl_indices = [[i] for i in range(len(smask))]
 
-        itrial = 0
+        # itrial = 0
         for i, sidx in enumerate(shl_indices):
             if smask[sidx][0, 0]:
                 continue
@@ -581,13 +606,13 @@ def expand_mask(
                     Cfull=Cfull, ovlp=S[:, test_mask]),
                 nfuncs))
 
-            print(f'{itrial:3d}', end='')
-            print_data(
-                test_mask, test_sums[-1][1], test_sums[-1][1] - last_sum, get_atom_shell_label(mol_obj, i),
-                (test_sums[-1][1] - last_sum) / nfuncs, 0.0,
-                print_header=False
-            )
-            itrial += 1
+            # print(f'{itrial:3d}', end='')
+            # print_data(
+            #     test_mask, test_sums[-1][1], test_sums[-1][1] - last_sum, get_atom_shell_label(mol_obj, i),
+            #     (test_sums[-1][1] - last_sum) / nfuncs, 0.0,
+            #     print_header=False
+            # )
+            # itrial += 1
 
     if nfunc_normalisation:
         test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]
@@ -599,7 +624,7 @@ def expand_mask(
         array_index = np.argmin(test_differences)
     current_idx_to_flip = test_sums[array_index][0]
 
-    print(f'end shell loop, add shell {array_index}\n')
+    # print(f'end shell loop, add shell {array_index}\n')
 
     if smask is None:
         mask[current_idx_to_flip] = True
@@ -610,24 +635,16 @@ def expand_mask(
         mask = smask_to_mask(smask)
     return mask, test_differences[array_index], test_sums[array_index][1], smask
 
-def get_atom_shell_label(mol, shl_idx, link_shells=True):
-    # ao_labels = np.array(mol_obj.ao_labels())[]
-    # num, symb = ao_labels[0].split()[:2]
-    # label = ""
-    # label += "" if link_shells else f"{num} "
-    # shllbl = re.findall(r'(\d+[a-zA-Z])', ao_labels[0].split()[2])[0]
-    # label += f"{symb} {shllbl}"
-
+def get_atom_shell_label(mol, shl_idx, link_shells=False):
     count = np.zeros((mol.natm, 9), dtype=int)
     label = []
     for ib in range(mol.nbas):  # nbas = number of shells (basis fcts)
         ia = mol.bas_atom(ib)   # atom that given basis function sits on
-        l = mol.bas_angular(ib) # angular momentum l of given basis function
+        l = mol.bas_angular(ib) # angular momentum l of basis function
         strl = lib.param.ANGULAR[l] # angular momentum label
         nc = mol.bas_nctr(ib)   # number of CGTOs for given shell
         symb = mol.atom_symbol(ia)  # label of given atom
-        nelec_ecp = mol.atom_nelec_core(ia) # Number of ecp electrons(?)
-
+        nelec_ecp = mol.atom_nelec_core(ia) # Number of ecp electrons
 
         if nelec_ecp == 0 or l > 3:
             shl_start = count[ia,l]+l+1
@@ -637,7 +654,9 @@ def get_atom_shell_label(mol, shl_idx, link_shells=True):
         count[ia,l] += nc
         for n in range(shl_start, shl_start+nc):
             label.append((ia, symb, '%d%s' % (n, strl)))
-    
+
+    if link_shells:
+        return '%s %s' % label[shl_idx][1:]
     return '%d %s %s' % label[shl_idx]
 
 
@@ -647,7 +666,7 @@ def get_sub_scf_attributes(
     overlap,
     dft=False,
     xc='b3lyp',
-    grid_level=3
+    grid_level=7
     ):
     """Calculates converged attributes for the system.
 
@@ -669,14 +688,15 @@ def get_sub_scf_attributes(
         subbasis, the MO coefficient matrix of the subbasis.
     """
     RHF = (len(fock.shape) == 2)
-    if RHF:
-        mf = mol.RHF()
-    else:
-        mf = mol.UHF()
+    # if RHF:
+    #     mf = mol.RHF()
+    # else:
+    #     mf = mol.UHF()
+    mf = mol.HF()
     mf = mf.apply(scf.addons.remove_linear_dep_)
     if dft:
         mf = mf.to_ks(xc=xc)
-        mf.grids.level = grid_level # FIXME
+        mf.grids.level = grid_level
         mf.grids.prune = None
 
     # Diagonalize fock matrix and form guess density matrix
@@ -685,9 +705,10 @@ def get_sub_scf_attributes(
         occ = mf.get_occ(e, c)
         dm = mf.make_rdm1(c, occ)
         mf.init_guess = dm
-    mf.kernel()
+    mf.kernel(dump_chk=False)
 
     scf_energy = mf.e_tot
+    # sum over occupied orbital energies
     if RHF:
         nocc_sb = len(mf.mo_occ > 0)
         scf_orbital_energy = sum(np.sort(mf.mo_energy)[:nocc_sb])
@@ -706,13 +727,14 @@ def create_shell_separated_mol(mol, verbose=0):
     cmol = gto.M(
         atom=mol.atom, basis=shell_sep_basis,
         charge=mol.charge, spin=mol.spin, unit=mol.unit,
+        ecp=mol.ecp,
         verbose=0)
     return cmol
 
 
 def print_data_header():
     print(
-            f'\n{"N_func":>10s}  {"Added ao/shell(s)":>18s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
+            f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
         )
 
 
@@ -734,8 +756,8 @@ def print_data(
         Qsqrd = "-"
 
     print(f"{sum(mask):10d}", end="")
-    print(f" {ao_or_shell_label:>18s}", end="")
-    print(f" {criteria_value:15.9f}", end="")
+    print(f" {ao_or_shell_label:>13s}", end="")
+    print(f" {criteria_value:16.9f}", end="")
     print(f'  {diff:{">15s" if isinstance(diff, str) else "15.9f"}}', end="")
     print(f'  {E_scf:{">15s" if isinstance(E_scf, str) else "15.9f"}}', end="")
     print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "18.12f"}}')
@@ -787,9 +809,10 @@ def mask_matrix(mat, mask, RHF=True):
         masked_mat : ndarray
             The masked matrix
     """
-    if RHF != (len(mat.shape) == 2):
-        raise RuntimeError("")
-
+    # print(f'{mat.shape=}')
+    # if RHF != (len(mat.shape) == 2):
+    #     raise RuntimeError("")
+    RHF = (len(mat.shape) == 2)
     return mat[mask, :][:, mask] if RHF else mat[:, mask, :][:, :, mask]
 
 
@@ -805,11 +828,55 @@ def basis_functions_per_atom(mol):
     return func_per_atom
 
 
+def spherical_average(mat, ml):
+    """Calculate the spherical average of a matrix.
+
+    Args:
+        mat : ndarray
+            The (Fock) matrix which will be spherically averaged.
+        ml : ndarray | arraylike
+            An array with the numbers of functions on the shells.
+    """
+
+    mat_copy = mat.copy()
+    restricted = (len(mat_copy.shape) == 2)
+    if restricted:
+        return sph_avg(mat_copy, ml)
+    mat_out = np.ndarray(mat_copy.shape)
+    mat_out[0] = sph_avg(mat_copy[0], ml)
+    mat_out[1] = sph_avg(mat_copy[1], ml)
+    return mat_out
+
+
+def sph_avg(mat, ml):
+    mat_copy = mat.copy()
+    offset = 0
+    for nfunc in ml:
+        if nfunc == 1:
+            offset += nfunc
+            continue
+        shell_mat = mat_copy[offset:offset+nfunc, offset:offset+nfunc]
+        # Extract diagonal of the shell block
+        diag = np.diag(shell_mat)
+        avg = np.mean(diag)
+        shell_mat = np.diag([avg]*diag.shape[0])
+
+        for i in range(nfunc):
+            mat_copy[offset+i,offset:offset+nfunc] = shell_mat[i,:]
+
+        offset += nfunc
+    return mat_copy
+
+
 def atomic_block_minimal_basis(
     mol,
-    F=None,
-    S=None,
+    F,
+    S,
+    Q_tol=1,
     by_shell=True,
+    get_mask_history=True,
+    link_shells=False,
+    verbose=True,
 ):
     """Create minimal basis from atomic block decomposition.
     """
@@ -817,20 +884,21 @@ def atomic_block_minimal_basis(
     assert np.sum(func_per_atom) == mol.nao
 
     minimal_basis_mask = np.zeros(mol.nao, dtype=bool)
-    if by_shell:
-        smask = init_smask(mol, mol.cart)
-    # Get initial Fock matrix and overlap if not provided.
-    if F is None or S is None:
-        mf = scf.HF(mol)
-        dm0 = mf.init_guess_by_atom()
-        F = mf.get_fock(dm=dm0)
-        S = mf.get_ovlp()
+    # if by_shell:
+    smask = init_smask(mol, mol.cart)
+    if get_mask_history:
+        mask_history = []
+        full_mask = np.zeros(mol.nao, dtype=bool)
+
     atoms = list(map(lambda x: x[0], mol._atom))
+
+    restricted = (len(F.shape) == 2)
     
     # Loop through atomic blocks in the Fock matrix
     nfuncs_min_tot = 0
     for i,funcs_and_atom in enumerate(zip(func_per_atom, atoms)):
         funcs, atom = funcs_and_atom
+        print(f'{atom=}')
         if by_shell:
             smask_atom = list(filter(lambda x: x[3][0] == i, smask))
         mask = np.zeros(mol.nao, dtype=bool)
@@ -839,43 +907,116 @@ def atomic_block_minimal_basis(
         mask[func_offset:func_offset+funcs] = True
         S_atom = mask_matrix(S, mask)
         F_atom = mask_matrix(F, mask)
-        nfunc_per_minimal_atom = int(np.ceil(ELEMENTS.index(atom) / 2))
+        nfunc_per_minimal_atom = int(np.ceil(
+            (ELEMENTS.index(atom)-mol.atom_nelec_core(i)) / 2))
         nfuncs_min_tot += nfunc_per_minimal_atom
         
-        e_atom, c_atom = eigh(F_atom.copy(), S_atom.copy())
-        occs = np.zeros(c_atom.shape[1])
-        occs[:nfunc_per_minimal_atom] = 2
-        P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
-        # print(f'{e_atom[:nfunc_per_minimal_atom]}')
+        # TODO: fix the shell array (currently for whole mol, not just atomic block)
+        F_ave = F_atom.copy()
+        #smask_atom = [sm for sm in smask if sm[3][0] == i]
+        F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
+
+        e_atom, c_atom = eigh(F_ave, S_atom.copy())
+
+        def number_of_states(energies, thresh=1e-3):
+            nfuncs_include = nfunc_per_minimal_atom
+            while nfuncs_include < funcs \
+            and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
+                nfuncs_include += 1
+            #print(f'{energies=} {nfuncs_include=} {energies[nfuncs_include+1]-energies[nfunc_per_minimal_atom]=}')
+            return nfuncs_include
+
+        # print(f'{nfunc_per_minimal_atom=}')
+        if verbose:
+            with np.printoptions(precision=2, suppress=True):
+                print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
+
+        if restricted:
+            print(f'Energy of highest orbital {e_atom[number_of_states(e_atom)-1]*27.2114} eV')
+            occs = np.zeros(c_atom.shape[1])
+            occs[:number_of_states(e_atom)] = 2
+            Qlim = 2*number_of_states(e_atom)
+            nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
+            # P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
+            P_atom = np.abs(
+                np.einsum('ik,kj,lj->il', c_atom, np.diag(occs), c_atom.conj())
+            )
+        else:
+            print(f'Energy of highest alpha orbital {e_atom[0, number_of_states(e_atom[0])-1]*27.2114} eV')
+            print(f'Energy of highest beta  orbital {e_atom[1, number_of_states(e_atom[1])-1]*27.2114} eV')
+            occs = np.zeros((2, c_atom.shape[2]))
+            occs[0, :number_of_states(e_atom[0])] = 1
+            occs[1, :number_of_states(e_atom[1])] = 1
+            P_atom = np.abs(
+                c_atom[0] @ np.diag(occs[0]) @ c_atom[0].conj().T +
+                c_atom[1] @ np.diag(occs[1]) @ c_atom[1].conj().T
+                )
+            Qlim = number_of_states(e_atom[0])+number_of_states(e_atom[1])
+            nocca, noccb = number_of_states(e_atom[0]), number_of_states(e_atom[1])
+        print(f'{Qlim=}')
 
         atom_indices = set()
-        while len(atom_indices) < nfunc_per_minimal_atom:
+        Q = 0
+        eps = Q_tol
+        if eps >= Qlim:
+            raise ValueError(f'Tolerance for Q must be smaller than the number of states, {Qlim=}!')
+        # while len(atom_indices) < nfunc_per_minimal_atom:
+        P_atom = np.round(P_atom, 12)
+        while np.abs(Q - Qlim) > eps:
             P_atom_idx = np.unravel_index(np.argmax(P_atom, axis=None),P_atom.shape)
-            # TODO: Make sure only one index tuple is used
-
+            # Check whether only 1 index tuple was found (no two equal 
+            # elements in P_atom), otherwise set P_atom_idx to the first
+            # found index tuple
+            if not isinstance(P_atom_idx[0], np.int64):
+                P_atom_idx = P_atom_idx[0]
             Pat_i, Pat_j = P_atom_idx
-
+            
             # Set functions of same shell to True
             if by_shell:
                 mask_atom[Pat_i] = True
                 mask_atom[Pat_j] = True
                 smask_atom = mask_to_smask(mask_atom, smask_atom, mol.cart)
                 mask_atom = smask_to_mask(smask_atom, mol.cart)
+                e_mask, c_mask = eigh(
+                    mask_matrix(F_ave.copy(), mask_atom),
+                    mask_matrix(S_atom.copy(), mask_atom)
+                    )
+                
+                if get_mask_history:
+                    # set Pat_i and Pat_j in the full mask to True in
+                    # the current atom block
+                    full_mask[func_offset + Pat_i] = True
+                    full_mask[func_offset + Pat_j] = True
+                    full_smask = mask_to_smask(full_mask, smask.copy(), mol.cart)
+                    mask_history.append(full_smask)
+
                 # set elements i,j and j,i of P_atom to zero
-                # for idx in np.where(mask_atom):
                 P_atom[mask_atom, :] = 0
                 P_atom[:, mask_atom] = 0
+
                 # add indices to atom_indices
                 atom_indices.update(np.where(mask_atom)[0].tolist())
+                Q = get_q_sqrd(
+                    c_atom.copy(), c_mask,
+                    S_atom[:, mask_atom].copy(),
+                    (nocca, noccb),
+                    )
+                # Teekkarin debugger ###########################
+                tempmaskarr = np.zeros(len(full_mask))
+                tempmaskarr[func_offset + Pat_i] = True
+                shell_idx = maskidx_to_smaskidx(tempmaskarr, smask)[func_offset + Pat_i]
+                print(f'{get_atom_shell_label(mol, shell_idx)}: {Q=:.14f}, {np.abs(Q - Qlim)=:.14f}, {eps=}')
+                # Teekkarin debugger ###########################
             else:
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
                 P_atom[Pat_i, Pat_j] = 0
                 P_atom[np.flip((Pat_i, Pat_j))] = 0
-            # print(f'{atom_indices=}')
         atom_indices = list(atom_indices)
         minimal_basis_mask[func_offset + np.asarray(atom_indices)] = True
 
     assert np.sum(minimal_basis_mask) >= nfuncs_min_tot
+    if get_mask_history:
+        return minimal_basis_mask, mask_history
     return minimal_basis_mask
 
 def find_subspace(
@@ -890,14 +1031,15 @@ def find_subspace(
     variant='enocc',
     link_shells=True,
     nfunc_normalisation=True,
-    dm0=None,
     dft=False,
     xc='b3lyp',
-    grid_level=3,
+    grid_level=7,
     return_mask_history=False,
-    mask_cutoff=None
+    mask_cutoff=None,
+    abd_initialization=True,
+    abd_Q_tol=.5,
 ):
-    """Looks for a Fock matrix subspace that approximately solves the
+    r"""Looks for a Fock matrix subspace that approximately solves the
     Roothaan equation FC=SCE below a convergence of conv_tol.
 
     Args:
@@ -936,9 +1078,6 @@ def find_subspace(
             Whether to normalise the criteria with the number of added
             functions.
             Optional, deault is True
-        dm0 : ndarray
-            Initial guess density matrix. Can be used to test different
-            intial guesses and their convergence with ABS method.
         dft : bool
             Hartree-Fock or DFT.
             Optional, default is False
@@ -955,6 +1094,13 @@ def find_subspace(
             The ratio of toggled functions to all functions after which
             subspace is considered converged. If None, conv_tol will be used,
             if supplied conv_tol will be ignored.
+        abd_initialization : bool
+            Toggles atomic block decomposition minimal basis initialization
+            on. Optional, default is True.
+        abd_Q_tol : float
+            The atomic block decomposition charge tolerance, i.e. how much
+            of the charge of the molecule the minimal basis is allowed to
+            not account for. Optional, default 0.5.
 
     Returns:
         1D boolean ndarray. A mask with selected function indices set to
@@ -962,20 +1108,28 @@ def find_subspace(
         data as described in Args section. Shell mask is returned
         instead of function mask if get_smask is True.
     """
+    if verbose:
+        print('Running find_subspace for mol ', mol.atom)
     scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
     if dft:
         scf_obj_copy.to_ks()
-        scf_obj_copy.grid.level = grid_level
-    F = scf_obj_copy.get_fock(dm=dm0)
+        scf_obj_copy.xc = xc
+        scf_obj_copy.grids.level = grid_level
+        scf_obj_copy.grids.prune = None
     # mask or smask initialization
     RHF = len(F.shape) == 2
     if RHF:
         Fii = np.diag(F)
     else:
         Fii = .5 * np.sum(np.diagonal(F, axis1=1, axis2=2), axis=0)
-    if True:
-        mask = atomic_block_minimal_basis(mol, F, S)
+    if abd_initialization:
+        mask, minimal_basis_history = atomic_block_minimal_basis(
+            mol,
+            F,
+            S,
+            Q_tol=abd_Q_tol,
+            link_shells=link_shells)
         mask_init_idx = np.where(mask)[0]
     else:
         mask_init_idx = [np.argmin(Fii)]
@@ -984,30 +1138,14 @@ def find_subspace(
     smask = None
     nocc = mol.nelec
 
-    aolabels = fullbasis_mol.ao_labels()
-    for i in range(len(Fii)):
-        print(f'{aolabels[i]} {Fii[i]}')
-
-    changes = mask_init_idx
-    for change in changes:
-        print(f'{change=}')
-        ao_labels = np.array(fullbasis_mol.ao_labels())[change]
-        num, symb = ao_labels.split()[:2]
-        label = ""
-        label += "" if link_shells else f"{num} "
-        shllbl = re.findall(r'(\d+[a-zA-Z])', ao_labels.split()[2])[0]
-        label += f"{symb} {shllbl}"
-        print_data(
-            mask, Fii[change], 0.0, label, 0.0, 0.0,
-            print_header=False
-        )
-
     if get_smask:
         smask = init_smask(fullbasis_mol, fullbasis_mol.cart)
         smask = mask_to_smask(mask, smask, fullbasis_mol.cart)
         if link_shells:
             # If link_shells true, set same shells of same atoms to True
             smask = set_linked_shells(smask, True)
+            # if verbose:
+            #     print('\nLinked shells: ON\n')
 
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
@@ -1021,15 +1159,25 @@ def find_subspace(
         variant, epsilon_i=Fii, nocc=nocc, sub_hcore=sub_hcore,
         Csub=Csub, Cfull=Cfull, ovlp=S[:, mask])
     if return_mask_history:
-        mask_history = [(
-            copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-            previous_sum,
-            0.0)]
-    
-    subbasis_mol = create_shell_separated_mol(fullbasis_mol)
+        if abd_initialization:
+            mask_history = []
+            for mb_mask in minimal_basis_history:
+                mask_history.append(
+                    (mb_mask,
+                    0.0,
+                    0.0,
+                    'Atomic Block Decomposition')
+                )
+        else:
+            mask_history = [(
+                copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                previous_sum,
+                0.0,
+                'Max element of Fock matrix')]
 
+    subbasis_mol = create_shell_separated_mol(fullbasis_mol)
     basis_initialized = False
-    while True:
+    while True and not np.all(mask):
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
             hcore=scf_obj_copy.get_hcore(),
@@ -1041,10 +1189,17 @@ def find_subspace(
         )
 
         if return_mask_history:
-            mask_history.append( (
-                copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-                current_criteria_val,
-                difference) )
+            if basis_initialized:
+                mask_history.append( (
+                    copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                    current_criteria_val,
+                    difference) )
+            else:
+                mask_history.append( (
+                    copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                    0.0,
+                    0.0,
+                    'Max element of Fock matrix') )
 
         subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
@@ -1077,7 +1232,8 @@ def mask_analysis(
     link_shells=True,
     dft=False,
     xc='b3lyp',
-    grid_level=3,
+    grid_level=7,
+    dm0=None,
     ):
     """Run mask analysis.
 
@@ -1110,6 +1266,8 @@ def mask_analysis(
         grid_level : int
             predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
             Optional, default is 3.
+        dm0 : numpy.ndarray
+            The initial guess density matrix
 
     Return:
         dataframe : array
@@ -1120,37 +1278,105 @@ def mask_analysis(
     """
     scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
+    if dm0 is None:
+        dm0 = scf_obj_copy.get_init_guess(key=scf_obj_copy.init_guess)
     RHF = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
 
-    if verbose:
-        print_data_header()
+    #init_method = mask_history[0][3]
+    initialized = False
     dataframe = []
     last_mask = [False] * fullbasis_mol.nao_nr()
+    is_smask = isinstance(mask_history[0][0], np.ndarray)
+    if is_smask:
+        last_smask = init_smask(mol, mol.cart)
     scf_energy = None
     scf_orbital_energy = None
     fullbasis_coeffs = scf_obj_copy.mo_coeff
-    for mask_i, current_val, difference in mask_history:
-        is_smask = isinstance(mask_i[0], np.ndarray)
+
+    # Filter mask_history of initialization and ABS
+    mask_history_init = list(filter(lambda x: len(x)>=4, mask_history))
+    mask_history = list(filter(lambda x: len(x)<=3, mask_history))
+
+    if verbose:
+        init_method = mask_history_init[0][3]
+        print('\n' + 20*'#' + ' INITIALIZATION: ' + f'{init_method.upper():<30s} ' + 33*'#')
+        i = 1
+        for mask_i, current_val, difference, *init in mask_history_init:
+            if is_smask:
+                smask = mask_i
+                changes = [i for i in range(len(smask)) if smask[i][0] != last_smask[i][0]]
+                label = get_atom_shell_label(mol, changes[0], link_shells=link_shells*initialized)
+                last_smask = smask
+                last_mask = smask_to_mask(last_smask, mol.cart)
+            else:
+                mask = mask_i
+                changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
+                aolabels = fullbasis_mol.ao_labels()
+                aolabels = [aolabels[i] for i in changes]
+                label = ' '.join(aolabels)
+                last_mask = mask
+            print(f'{label},  ', end='')
+            if i % 10 == 0: print()
+            i += 1
+        
+        print('\nNumber of toggled functions:', np.sum(last_mask))
+        print(20*'#' + ' INITIALIZATION END ' + 61*'#')
+
+        if link_shells:
+            print('\nLink shells: ON')
+            print('Additional functions may be added due to shell linking!')
+        
+        print_data_header()
+
+    
+    for mask_i, current_val, difference, *init in mask_history:
         if is_smask:
             smask = mask_i
-            subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-            newmask = [sm[0] for sm in smask]
-            newbas = fullbasis_mol._bas[newmask]
-            subbasis_mol._bas = newbas
+            # subbasis_mol = create_shell_separated_mol(fullbasis_mol)
+            # newmask = [sm[0] for sm in smask]
+            # newbas = fullbasis_mol._bas[newmask]
+            # subbasis_mol._bas.update(newbas)
+            extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
+            subbasis_mol = Mole(
+                atom = fullbasis_mol.atom, basis = extracted_basis,
+                charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
+                verbose = fullbasis_mol.verbose, unit=fullbasis_mol.unit,
+                ecp = ecp_bas
+                )
+            subbasis_mol.build()
             submf = scf.HF(subbasis_mol)
-
+            
             mask = smask_to_mask(smask, fullbasis_mol.cart)
-            maskedConvF = mask_matrix(fock, mask, RHF)
+            maskedF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
             maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
-            if not np.allclose(maskedS, submf.get_ovlp()) or not np.allclose(maskedHcore, submf.get_hcore()):
-                raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
+            # if not np.allclose(maskedS, submf.get_ovlp()):
+            #     raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
             if True:
-                scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                    subbasis_mol, maskedConvF, maskedS,
-                    dft=dft, xc=xc, grid_level=grid_level
-                )
+                # scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
+                #     subbasis_mol, maskedF, maskedS,
+                #     dft=dft, xc=xc, grid_level=grid_level
+                # )
+                ##### TRYING STUFF OUT
+                if dft:
+                    submf = submf.to_ks(xc=xc)
+                    submf.grids.level = grid_level
+                    submf.grids.prune = None
+                submf.kernel(dump_chk=False, dm0=mask_matrix(dm0, mask))
+                scf_energy = submf.e_tot
+                if fock.shape[1] > 1:
+                    e, subbasis_coeffs = eigh(maskedF, maskedS)
+                if RHF:
+                    nocc_sb = len(submf.mo_occ > 0)
+                    scf_orbital_energy = sum(np.sort(submf.mo_energy)[:nocc_sb])
+                else:
+                    nocc_sb = [len(submf.mo_occ[0] > 0), len(submf.mo_occ[1] > 0)]
+                    scf_orbital_energy = .5 * sum(
+                        np.sort(submf.mo_energy[0])[:nocc_sb[0]] +
+                        np.sort(submf.mo_energy[1])[:nocc_sb[1]])
+                #######
+
                 Q_sqrd= get_q_sqrd(
                     fullbasis_coeffs, subbasis_coeffs,
                     ovlp[:,mask], nocc
@@ -1158,6 +1384,9 @@ def mask_analysis(
             else:
                 scf_energy, scf_orbital_energy, subbasis_coeffs = 0.0, 0.0, 0.0
                 Q_sqrd = 0.0
+            
+            if not submf.converged:
+                print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
         else:
             mask = mask_i
             e, subbasis_coeffs = eigh(mask_matrix(fock, mask, RHF=RHF), mask_matrix(ovlp, mask))
@@ -1165,12 +1394,19 @@ def mask_analysis(
                 fullbasis_coeffs, subbasis_coeffs,
                 ovlp[:,mask], nocc
             )
-
+        
         if verbose:
-            changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
-            aolabels = fullbasis_mol.ao_labels()
-            aolabels = [aolabels[i] for i in changes]
-            label = ' '.join(aolabels)
+            if is_smask:
+                changes = [i for i in range(len(smask)) if smask[i][0] != last_smask[i][0]]
+                label = get_atom_shell_label(mol, changes[0], link_shells=link_shells*initialized)
+                if link_shells:
+                    label = ' '.join(label.split(' ')[1:])
+                    label = '*'+label
+            else:
+                changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
+                aolabels = fullbasis_mol.ao_labels()
+                aolabels = [aolabels[i] for i in changes]
+                label = ' '.join(aolabels)
             print_data(
                 mask, current_val, difference, label, scf_energy, Q_sqrd,
                 print_header=False
@@ -1185,4 +1421,6 @@ def mask_analysis(
                 copy.deepcopy(smask if is_smask else mask),
             ])
         last_mask = copy.deepcopy(mask)
+        if is_smask:
+            last_smask = copy.deepcopy(smask)
     return dataframe
