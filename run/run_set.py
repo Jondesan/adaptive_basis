@@ -128,18 +128,19 @@ def run_wa_set(args):
             # Initialize init guess method
             mf.init_guess = init_guess
 
-            # This produces the SAD density matrix
+            # This produces the initial guess density matrix
             dm0 = mf.get_init_guess(key=init_guess)
             # we need the corresponding Fock matrix
             F = mf.get_fock(dm=dm0)
             S = mf.get_ovlp()
+            # This gives the initial guess density matrix for the mf object
             mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
-
+            mf.mo_occs = mf.get_occ(mf.mo_energy)
             
             start = time()
             smaskhistory = adb.find_subspace(
                 F, S, mol, mf, conv_tol=conv_tol,
-                collect_data=False, get_smask=True,
+                get_smask=True,
                 return_mask_history=True,
                 nfunc_normalisation=normalisation,
                 abd_Q_tol=q_tol, abd_initialization=abd_init,
@@ -158,15 +159,16 @@ def run_wa_set(args):
             # print('Created the subbasis, output to file', f'{molfilename}_output_basis_new.nw')
             
             start = time()
-            mf.kernel(dm0=dm0)
+            mf.kernel()
             end = time()
+            converged_F = mf.get_fock()
             fullbasis_time = end - start
             fullbasis_converged = mf.converged
             fullbasis_energy = mf.e_tot
 
             data_sbys = adb.mask_analysis(
                 smaskhistory, mol, mf,
-                F, S, verbose=verbose,
+                converged_F, S, verbose=verbose,
                 dft=run_dft, xc=xcfunc, grid_level=grid_level,
             )
 
@@ -196,7 +198,6 @@ def run_wa_set(args):
             mask = adb.smask_to_mask(smaskhistory[-1][0])
             submf.kernel(dm0=adb.mask_matrix(dm0, mask))
             subbasis_converged = submf.converged
-
 
 
             func_mask = adb.smask_to_mask(smaskhistory[-1][0], mol.cart)
