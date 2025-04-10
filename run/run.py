@@ -218,7 +218,6 @@ def run_abs(
                         maskhistory = adb.find_subspace(
                             F, S, mol, myhf,
                             conv_tol=conv_tol,
-                            collect_data=False,
                             variant=variant,
                             return_mask_history=True,
                             nfunc_normalisation=nfunc_normalisation,
@@ -239,7 +238,6 @@ def run_abs(
                     smaskhistory = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
-                        collect_data=False,
                         get_smask=True,
                         variant=variant,
                         link_shells=lshells,

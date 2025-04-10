@@ -581,7 +581,6 @@ def expand_mask(
         else:
             shl_indices = [[i] for i in range(len(smask))]
 
-        # itrial = 0
         for i, sidx in enumerate(shl_indices):
             if smask[sidx][0, 0]:
                 continue
@@ -606,14 +605,6 @@ def expand_mask(
                     Cfull=Cfull, ovlp=S[:, test_mask]),
                 nfuncs))
 
-            # print(f'{itrial:3d}', end='')
-            # print_data(
-            #     test_mask, test_sums[-1][1], test_sums[-1][1] - last_sum, get_atom_shell_label(mol_obj, i),
-            #     (test_sums[-1][1] - last_sum) / nfuncs, 0.0,
-            #     print_header=False
-            # )
-            # itrial += 1
-
     if nfunc_normalisation:
         test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]
     else:
@@ -623,8 +614,6 @@ def expand_mask(
     else:
         array_index = np.argmin(test_differences)
     current_idx_to_flip = test_sums[array_index][0]
-
-    # print(f'end shell loop, add shell {array_index}\n')
 
     if smask is None:
         mask[current_idx_to_flip] = True
@@ -1026,7 +1015,6 @@ def find_subspace(
     scf_obj,
     conv_tol=1e-2,
     verbose=True,
-    collect_data=False,
     get_smask=False,
     variant='enocc',
     link_shells=True,
@@ -1050,7 +1038,7 @@ def find_subspace(
         mol : MoleBase
             The MoleBase molecule object
         scf_obj : SCF
-            The converged SCF object corresponding to mol
+            The SCF object corresponding to mol
         conv_tol : float
             Convergence criteria used to determine when to stop the
             subspace iteration.
@@ -1152,7 +1140,7 @@ def find_subspace(
     sub_hcore = Cfull = Csub = None
     if variant == 'ecore':
         sub_hcore = scf_obj_copy.hf.get_hcore(mol)[mask_init_idx, mask_init_idx]
-    if variant == 'elden':
+    elif variant == 'elden':
         _, Cfull = eigh(F, S)
         _, Csub = eigh(mask_matrix(F, mask, RHF=RHF), mask_matrix(S, mask))
     previous_sum = get_iteration_criteria_value(
@@ -1247,7 +1235,7 @@ def mask_analysis(
         scf_obj : pyscf.scf.(U/R/RO/D/-)HF object
             The self-consistent field object
         fock : numpy.ndarray
-            The Fock matrix
+            The converged Fock matrix
         ovlp : numpy.ndarray
             The overlap matrix
         verbose : bool
@@ -1333,10 +1321,6 @@ def mask_analysis(
     for mask_i, current_val, difference, *init in mask_history:
         if is_smask:
             smask = mask_i
-            # subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-            # newmask = [sm[0] for sm in smask]
-            # newbas = fullbasis_mol._bas[newmask]
-            # subbasis_mol._bas.update(newbas)
             extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
             subbasis_mol = Mole(
                 atom = fullbasis_mol.atom, basis = extracted_basis,
@@ -1351,8 +1335,8 @@ def mask_analysis(
             maskedF = mask_matrix(fock, mask, RHF)
             maskedS = mask_matrix(ovlp, mask)
             maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
-            # if not np.allclose(maskedS, submf.get_ovlp()):
-            #     raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
+            if not np.allclose(maskedS, submf.get_ovlp()):
+                raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
             if True:
                 # scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
                 #     subbasis_mol, maskedF, maskedS,
@@ -1363,10 +1347,13 @@ def mask_analysis(
                     submf = submf.to_ks(xc=xc)
                     submf.grids.level = grid_level
                     submf.grids.prune = None
-                submf.kernel(dump_chk=False, dm0=mask_matrix(dm0, mask))
+
+                # SCF initial guess
+                subbasis_energies, submf.mo_coeffs = eigh(maskedF, maskedS)
+                submf.mo_occs = submf.get_occ(subbasis_energies)
+                submf.kernel(dump_chk=False)
                 scf_energy = submf.e_tot
-                if fock.shape[1] > 1:
-                    e, subbasis_coeffs = eigh(maskedF, maskedS)
+
                 if RHF:
                     nocc_sb = len(submf.mo_occ > 0)
                     scf_orbital_energy = sum(np.sort(submf.mo_energy)[:nocc_sb])
@@ -1378,7 +1365,7 @@ def mask_analysis(
                 #######
 
                 Q_sqrd= get_q_sqrd(
-                    fullbasis_coeffs, subbasis_coeffs,
+                    fullbasis_coeffs, submf.mo_coeffs,
                     ovlp[:,mask], nocc
                 )
             else:
