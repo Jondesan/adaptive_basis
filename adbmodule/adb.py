@@ -189,7 +189,7 @@ def basis_to_file_nwchem(
             Additional NWChem options
     """
     sph_cart = "cartesian" if cart else "spherical"
-    with open(fn, "w") as f:
+    with open(fn + '.nw', "w") as f:
         if len(commentstring) != 0:
             for commentline in commentstring.split('#'):
                 f.write(f"#{commentline}\n")
@@ -481,14 +481,9 @@ def expand_mask(
     smask=None,
     variant='enocc',
     hcore=None,
-    subbasis_mol=None,
     Cfull=None,
     link_shells=True,
     nfunc_normalisation=True,
-    dft=False,
-    xc='b3lyp',
-    grid_level=7,
-    mol_obj=None
 ):
     r"""Expands the current mask by either one function or one shell
     based on smask.
@@ -991,10 +986,10 @@ def atomic_block_minimal_basis(
                     (nocca, noccb),
                     )
                 # Teekkarin debugger ###########################
-                tempmaskarr = np.zeros(len(full_mask))
-                tempmaskarr[func_offset + Pat_i] = True
-                shell_idx = maskidx_to_smaskidx(tempmaskarr, smask)[func_offset + Pat_i]
-                print(f'{get_atom_shell_label(mol, shell_idx)}: {Q=:.14f}, {np.abs(Q - Qlim)=:.14f}, {eps=}')
+                # tempmaskarr = np.zeros(len(full_mask))
+                # tempmaskarr[func_offset + Pat_i] = True
+                # shell_idx = maskidx_to_smaskidx(tempmaskarr, smask)[func_offset + Pat_i]
+                # tk_debugger(f'{get_atom_shell_label(mol, shell_idx)}: {Q=:.14f}, {np.abs(Q - Qlim)=:.14f}, {eps=}')
                 # Teekkarin debugger ###########################
             else:
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
@@ -1019,9 +1014,6 @@ def find_subspace(
     variant='enocc',
     link_shells=True,
     nfunc_normalisation=True,
-    dft=False,
-    xc='b3lyp',
-    grid_level=7,
     return_mask_history=False,
     mask_cutoff=None,
     abd_initialization=True,
@@ -1100,11 +1092,7 @@ def find_subspace(
         print('Running find_subspace for mol ', mol.atom)
     scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
-    if dft:
-        scf_obj_copy.to_ks()
-        scf_obj_copy.xc = xc
-        scf_obj_copy.grids.level = grid_level
-        scf_obj_copy.grids.prune = None
+
     # mask or smask initialization
     RHF = len(F.shape) == 2
     if RHF:
@@ -1117,7 +1105,8 @@ def find_subspace(
             F,
             S,
             Q_tol=abd_Q_tol,
-            link_shells=link_shells)
+            link_shells=link_shells,
+            verbose=verbose)
         mask_init_idx = np.where(mask)[0]
     else:
         mask_init_idx = [np.argmin(Fii)]
@@ -1169,11 +1158,9 @@ def find_subspace(
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
             hcore=scf_obj_copy.get_hcore(),
-            subbasis_mol=subbasis_mol, Cfull=scf_obj_copy.mo_coeff,
+            Cfull=scf_obj_copy.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
             nfunc_normalisation=nfunc_normalisation,
-            dft=dft, xc=xc, grid_level=grid_level,
-            mol_obj=fullbasis_mol
         )
 
         if return_mask_history:

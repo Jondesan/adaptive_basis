@@ -5,11 +5,17 @@ import os
 import argparse
 
 import adb
+import adbutils as adbutils
+from basis_set_exchange import convert_formatted_basis_file
 from pyscf import scf, gto, dft
 import numpy as np
 import pandas as pd
 import datetime
 from time import time
+import psi4
+import io
+from copy import deepcopy
+import re
 
 
 def get_files_in_folder(folder: str):
@@ -97,6 +103,220 @@ def get_molecules_in_dir(
     print(f"with filenames {[name[0] for name in molecules]}")
     return molecules
 
+
+def get_subbasis(
+        mol,
+        conv_tol=1e-2,
+        q_tol=1.0,
+        init_guess='atom',
+        normalisation=True,
+        abd_init=True,
+        run_dft=True
+        ):
+    
+    xcfunc = 'PBE'
+    grid_level = 7
+
+    mf = dft.KS(mol) if run_dft else scf.HF(mol)
+    if run_dft:
+        mf.grids.level = grid_level
+        mf.xc = xcfunc
+        mf.grids.prune = None
+    
+    # Initialize init guess method
+    mf.init_guess = init_guess
+
+    # This produces the initial guess density matrix
+    dm0 = mf.get_init_guess(key=init_guess)
+    # we need the corresponding Fock matrix
+    F = mf.get_fock(dm=dm0)
+    S = mf.get_ovlp()
+    # This gives the initial guess density matrix for the mf object
+    mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
+    mf.mo_occs = mf.get_occ(mf.mo_energy)
+    
+    smask = adb.find_subspace(
+        F, S, mol, mf, conv_tol=conv_tol,
+        get_smask=True,
+        return_mask_history=False,
+        nfunc_normalisation=normalisation,
+        abd_Q_tol=q_tol, abd_initialization=True,
+        verbose=False,
+    )
+
+    return smask
+
+
+def subbases_to_files(args):
+    mpath = args.mpath
+    basis = args.basis
+    units = args.unit
+    conv_tol = args.conv_tol
+    q_tol = args.q_tol
+    normalisation = args.normalisation
+    output = args.output
+    run_dft = args.dft
+    abd_init = args.abd_init
+    verbose = args.verbose
+
+    mols = get_molecules_in_dir(mpath, basis, unit=units)
+    
+    with open(output, 'w', buffering=1) as f:
+        for molfilename, mol, uncmol, shells, init_guess, basisname in mols:
+            xcfunc = 'PBE'
+            grid_level = 7
+
+            mf = dft.KS(mol) if run_dft else scf.HF(mol)
+            if run_dft:
+                mf.grids.level = grid_level
+                mf.xc = xcfunc
+                mf.grids.prune = None
+            
+            # Initialize init guess method
+            mf.init_guess = init_guess
+
+            # This produces the initial guess density matrix
+            dm0 = mf.get_init_guess(key=init_guess)
+            # we need the corresponding Fock matrix
+            F = mf.get_fock(dm=dm0)
+            S = mf.get_ovlp()
+            # This gives the initial guess density matrix for the mf object
+            mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
+            mf.mo_occs = mf.get_occ(mf.mo_energy)
+            
+            smaskhistory = adb.find_subspace(
+                F, S, mol, mf, conv_tol=conv_tol,
+                get_smask=True,
+                return_mask_history=True,
+                nfunc_normalisation=normalisation,
+                abd_Q_tol=q_tol, abd_initialization=abd_init,
+                verbose=verbose,
+            )
+
+            molname = molfilename.split('.')[0] # Extract molecule name from filename
+            adbutils.subbasis_to_file(
+                mol,
+                smaskhistory[-1][0],
+                basis_fname=f'{molname}_subbasis',
+                basis_file_comment='Batch creation of subbasis files.'
+            )
+
+
+def extract_occ_values_from_string(occ):
+    occ = ''.join(occ.split()[1:])
+    occ = occ.translate({ord(c): None for c in '[]'}) # Remove '[' and ']'
+    occ = np.fromstring(occ, dtype=int, sep=',')
+
+    return occ
+
+
+def extract_occupations_from_psi4_output(output_lines, is_unrestricted=False):
+    docc = list(filter(lambda x: 'DOCC' in x, output_lines))
+    if is_unrestricted: # Extract SOCC from output
+        socc = list(filter(lambda x: 'SOCC' in x, output_lines))
+    else:   # Create SOCC string of equal length with zeroes
+        socc = deepcopy(docc)
+        for i,so in enumerate(socc):
+            socc[i] = so.replace('DOCC', 'SOCC')
+            socc[i] = re.sub(r'(\d+)', '0', socc[i])
+    return list(zip(docc, socc))
+
+
+def extract_occupation_values(occ_tuple):
+    """Takes as input a tuple of psi4 occupation strings from the output file
+    and outputs a tuple of integer arrays with the corresponding occupation
+    values.
+
+    The output format is
+    ('  DOCC   [     3,    0,    0,    0,    0,    2,    1,    1 ]',
+     '  SOCC   [     3,    0,    0,    0,    0,    2,    1,    1 ]')
+    """
+    return (extract_occ_values_from_string(occ) for occ in occ_tuple)
+
+
+def run_psi4(
+        args,
+        mol,
+        basis,
+        init_guess,
+        dft=True):
+    with open(mol.atom) as f:
+        xyz = f.read()
+    psi4mol = psi4.geometry(xyz)
+    unit = mol.unit
+    unit_identifier = {
+        'angstrom': 0,
+        'bohr': 1}[unit.lower()]
+    psi4mol.set_units(psi4.core.GeometryUnits(unit_identifier))
+    psi4mol.set_multiplicity(mol.spin + 1)
+    is_unrestricted = mol.spin > 0
+
+    psi4.set_options({'reference': 'uhf' if is_unrestricted else 'rhf'})
+    
+    f = io.BytesIO()
+    converged = False
+    with adbutils.stdout_redirector(f):
+        try:
+            e_tot, wfn = psi4.energy(
+                'PBE',
+                basis=basis,
+                return_wfn=True)
+            converged = True
+        except:
+            pass
+    psi4.core.clean()
+    output_file = open('output.dat', 'w')
+    output_file.write(f.getvalue().decode('utf-8'))
+    
+    # Filter lines with DOCC
+    psi4output = f.getvalue().decode('utf-8').split('\n')
+    occs = extract_occupations_from_psi4_output(psi4output, is_unrestricted)
+    if converged:
+        docc, socc = extract_occupation_values(occs[-1])
+    else:
+        # If SCF did not converge check which occupations were found and
+        # determine which has lowest converged energy
+        unique_occs = list(set(occs))
+
+        print(f'Found the following occupations:\n{'\n\n'.join(
+            map(lambda x: '\n'.join(x), unique_occs))}')
+        print('Testing which provides lowest converged energy...')
+        doccs = []
+        for occ in unique_occs:
+            docc, socc = extract_occupation_values(occ)
+            psi4.set_options({'DOCC': list(docc)})
+            psi4.set_options({'SOCC': list(socc)})
+            f = io.BytesIO()
+            with adbutils.stdout_redirector(f):
+                e_tot_docc, wfn_docc = psi4.energy(
+                    'PBE',
+                    basis=basis,
+                    return_wfn=True)
+            psi4.core.clean()
+            doccs.append((docc, e_tot_docc, wfn_docc))
+
+        doccs.sort(key=lambda x: x[1])
+        print(doccs)
+        docc, e_tot, wfn = doccs[0]
+    
+    subbasis_fname = mol.atom.split('/')[-1].split('.')[0] + '_subbasis'
+    smask = get_subbasis(
+        mol, args.conv_tol, q_tol=args.q_tol, init_guess=init_guess,
+        normalisation=args.normalisation, abd_init=args.abd_init,
+        run_dft=args.dft)
+    adbutils.subbasis_to_file(mol, smask, basis_fname=subbasis_fname)
+    convert_formatted_basis_file(subbasis_fname + '.nw', subbasis_fname + '.gbs')
+
+    # SCF in the subbasis
+    psi4.set_options({'DOCC': list(docc)})
+    psi4.set_options({'SOCC': list(socc)})
+    with adbutils.stdout_redirector(f):
+        e_tot_sub, wfn_sub = psi4.energy(
+            'PBE',
+            basis=subbasis_fname,
+            return_wfn=True)
+    
+    print('Fullbasis energy:', e_tot, '\nSubbasis energy:', e_tot_sub)
 
 def run_wa_set(args):
     mpath = args.mpath
@@ -195,7 +415,9 @@ def run_wa_set(args):
                 mf.xc = xcfunc
                 mf.grids.prune = None
 
-            mask = adb.smask_to_mask(smaskhistory[-1][0])
+            # Run SCF algorithm for the subbasis
+            smask = smaskhistory[-1][0]
+            mask = adb.smask_to_mask(smask)
             submf.kernel(dm0=adb.mask_matrix(dm0, mask))
             subbasis_converged = submf.converged
 
@@ -299,10 +521,22 @@ if __name__ == '__main__':
         default=True,
         help="Whether output is robust or not, optional. Default is True.",
     )
+    parser.add_argument(
+        "--calculate_subbasis_only",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Whether to only calculate the subbasis, optional. Default is False.",
+    )
 
     args = parser.parse_args()
-    
-    run_wa_set(args)
-    # run_multiplicities(args)
+    subbas_only = args.calculate_subbasis_only
+
+    if subbas_only:
+        subbases_to_files(args)
+    else:
+        # run_wa_set(args)
+        # run_multiplicities(args)
+        mols = get_molecules_in_dir(args.mpath, args.basis, unit=args.unit)
+        run_psi4(args, mols[0][1], basis='def2-TZVP', init_guess=mols[0][4])
 
 
