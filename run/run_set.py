@@ -250,7 +250,7 @@ def run_psi4(
     psi4mol.set_units(psi4.core.GeometryUnits(unit_identifier))
     psi4mol.set_multiplicity(mol.spin + 1)
     is_unrestricted = mol.spin > 0
-
+    method = 'PBE' if dft else 'SCF'
     psi4.set_options({'reference': 'uhf' if is_unrestricted else 'rhf'})
     
     f = io.BytesIO()
@@ -258,7 +258,7 @@ def run_psi4(
     with adbutils.stdout_redirector(f):
         try:
             e_tot, wfn = psi4.energy(
-                'PBE',
+                method,
                 basis=basis,
                 return_wfn=True)
             converged = True
@@ -289,7 +289,7 @@ def run_psi4(
             f = io.BytesIO()
             with adbutils.stdout_redirector(f):
                 e_tot_docc, wfn_docc = psi4.energy(
-                    'PBE',
+                    method,
                     basis=basis,
                     return_wfn=True)
             psi4.core.clean()
@@ -312,7 +312,7 @@ def run_psi4(
     psi4.set_options({'SOCC': list(socc)})
     with adbutils.stdout_redirector(f):
         e_tot_sub, wfn_sub = psi4.energy(
-            'PBE',
+            method,
             basis=subbasis_fname,
             return_wfn=True)
     
@@ -537,6 +537,6 @@ if __name__ == '__main__':
         # run_wa_set(args)
         # run_multiplicities(args)
         mols = get_molecules_in_dir(args.mpath, args.basis, unit=args.unit)
-        run_psi4(args, mols[0][1], basis='def2-TZVP', init_guess=mols[0][4])
+        run_psi4(args, mols[0][1], basis='def2-TZVP', init_guess=mols[0][4], dft=args.dft)
 
 
