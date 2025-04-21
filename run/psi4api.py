@@ -6,6 +6,7 @@ import ctypes
 import io
 import os, sys
 import tempfile
+import numpy as np
 
 libc = ctypes.CDLL(None)
 c_stdout = ctypes.c_void_p.in_dll(libc, 'stdout')
@@ -45,21 +46,58 @@ def stdout_redirector(stream):
 
 if __name__ == '__main__':
     prefix = '/home/joonahuh/uni/electronic_structure/'
-    with open(prefix + 'geoms/bas.spin0.init_atom.xyz') as f:
+    with open(prefix + 'benchmarks/pom_geom/weigend_ahlrichs/new_geoms/li2o.spin0.init_atom.xyz') as f:
         xyz = f.read()
-    with open(prefix + 'abs/bas_output_basis.gbs') as f:
-        basis = f.read()
+    # with open(prefix + 'abs/bas_output_basis.gbs') as f:
+    #     basis = f.read()
     mol = psi4.geometry(xyz)
     mol.set_units(psi4.core.GeometryUnits(1))
+    mol.set_multiplicity(1)
+
     #psi4.set_options({'basis': prefix + 'abs/bas_output_basis.gbs'})
 
     f = io.BytesIO()
+    converged = False
+    e_tot, wfn = 0.0, None
     with stdout_redirector(f):
-        e_tot, wfn = psi4.energy('PBE', basis='bas_output_basis', return_wfn=True)
+        try:
+            e_tot, wfn = psi4.energy(
+                'PBE',
+                basis='li2o_subbasis',
+                # basis='def2-TZVP',
+                return_wfn=True)
+            converged = True
+        except:
+            pass
 
-    print('Hello World!')
-    print(
-            '\n'.join(list(filter(
-                lambda x: 'DOCC' in x,
-                f.getvalue().decode('utf-8').split('\n')
-            ))))
+    if not converged:
+        psi4output = f.getvalue().decode('utf-8').split('\n')
+        # Filter lines with DOCC
+        psi4output = list(filter(lambda x: 'DOCC' in x, psi4output))
+        unique_docc = list(set(psi4output))
+
+        print('Found the following symmetries:\n','\n'.join(unique_docc))
+        print('Testing which provides lowest converged energy...')
+        doccs = []
+        for docc in unique_docc:
+            docc = ''.join(docc.split()[1:])
+            docc = docc.translate({ord(c): None for c in '[]'}) # Remove '[' and ']'
+            
+            docc = np.fromstring(docc, dtype=int, sep=',')
+
+            psi4.set_options({'DOCC': list(docc)})
+            f = io.BytesIO()
+            with stdout_redirector(f):
+                e_tot_docc, wfn_docc = psi4.energy(
+                    'PBE',
+                    basis='li2o_subbasis',
+                    # basis='def2-TZVP',
+                    return_wfn=True)
+            doccs.append((docc, e_tot_docc))
+            if e_tot_docc < e_tot:
+                e_tot = e_tot_docc
+                wfn = wfn_docc
+        doccs.sort(key=lambda x: x[1])
+        print(doccs)
+
+    print(e_tot)

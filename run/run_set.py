@@ -250,7 +250,7 @@ def run_psi4(
     psi4mol.set_units(psi4.core.GeometryUnits(unit_identifier))
     psi4mol.set_multiplicity(mol.spin + 1)
     is_unrestricted = mol.spin > 0
-    method = 'PBE' if dft else 'SCF'
+    method = 'B3LYP' if dft else 'SCF'
     psi4.set_options({'reference': 'uhf' if is_unrestricted else 'rhf'})
     
     f = io.BytesIO()
@@ -317,6 +317,7 @@ def run_psi4(
             return_wfn=True)
     
     print('Fullbasis energy:', e_tot, '\nSubbasis energy:', e_tot_sub)
+    return e_tot, e_tot_sub
 
 def run_wa_set(args):
     mpath = args.mpath
@@ -532,11 +533,15 @@ if __name__ == '__main__':
     subbas_only = args.calculate_subbasis_only
 
     if subbas_only:
-        subbases_to_files(args)
+        adbutils.subbases_to_files(args)
     else:
         # run_wa_set(args)
         # run_multiplicities(args)
-        mols = get_molecules_in_dir(args.mpath, args.basis, unit=args.unit)
-        run_psi4(args, mols[0][1], basis='def2-TZVP', init_guess=mols[0][4], dft=args.dft)
-
+        mols = adbutils.get_molecules_in_dir(
+            args.mpath, args.basis, unit=args.unit)
+        e_full, e_sub = adbutils.run_psi4(
+            args, mols[0][1], basis='def2-TZVP',
+            init_guess=mols[0][4], dft=args.dft)
+        print('Energy in full basis:', e_full)
+        print('Energy in subbasis:', e_sub)
 
