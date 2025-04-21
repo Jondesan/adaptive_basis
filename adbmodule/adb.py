@@ -15,6 +15,7 @@ from pyscf.scf.addons import canonical_orth_
 from pyscf import lib, gto, scf
 from warnings import warn
 from operator import itemgetter
+import adbutils
 import copy
 import sys
 import re
@@ -1094,8 +1095,8 @@ def find_subspace(
     fullbasis_mol = create_shell_separated_mol(mol)
 
     # mask or smask initialization
-    RHF = len(F.shape) == 2
-    if RHF:
+    is_restricted = len(F.shape) == 2
+    if is_restricted:
         Fii = np.diag(F)
     else:
         Fii = .5 * np.sum(np.diagonal(F, axis1=1, axis2=2), axis=0)
@@ -1131,7 +1132,7 @@ def find_subspace(
         sub_hcore = scf_obj_copy.hf.get_hcore(mol)[mask_init_idx, mask_init_idx]
     elif variant == 'elden':
         _, Cfull = eigh(F, S)
-        _, Csub = eigh(mask_matrix(F, mask, RHF=RHF), mask_matrix(S, mask))
+        _, Csub = eigh(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
     previous_sum = get_iteration_criteria_value(
         variant, epsilon_i=Fii, nocc=nocc, sub_hcore=sub_hcore,
         Csub=Csub, Cfull=Cfull, ovlp=S[:, mask])
@@ -1204,11 +1205,13 @@ def find_subspace(
 def mask_analysis(
     mask_history, mol, scf_obj,
     fock, ovlp, verbose=True,
+    basis='def2-tzvp',
     link_shells=True,
     dft=False,
     xc='b3lyp',
     grid_level=7,
     dm0=None,
+    use_psi4=False,
     ):
     """Run mask analysis.
 
@@ -1227,6 +1230,8 @@ def mask_analysis(
             The overlap matrix
         verbose : bool
             Whether to print data during analysis. Default is True.
+        basis : str
+            Name of the full basis set. Will be used if use_psi4 is True.
         link_shells : bool
             Whether the shells of same atoms have been linked during ABS
             calculation. Not strictly required even in the case of linked shell
@@ -1243,6 +1248,9 @@ def mask_analysis(
             Optional, default is 3.
         dm0 : numpy.ndarray
             The initial guess density matrix
+        use_psi4 : bool
+            If True, psi4 will be used for SCF computation instead of PySCF.
+            Optional, default is False.
 
     Return:
         dataframe : array
@@ -1255,7 +1263,7 @@ def mask_analysis(
     fullbasis_mol = create_shell_separated_mol(mol)
     if dm0 is None:
         dm0 = scf_obj_copy.get_init_guess(key=scf_obj_copy.init_guess)
-    RHF = len(fock.shape) == 2
+    is_restricted = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
 
     #init_method = mask_history[0][3]
@@ -1267,7 +1275,7 @@ def mask_analysis(
         last_smask = init_smask(mol, mol.cart)
     scf_energy = None
     scf_orbital_energy = None
-    fullbasis_coeffs = scf_obj_copy.mo_coeff
+    C_full = scf_obj_copy.mo_coeff
 
     # Filter mask_history of initialization and ABS
     mask_history_init = list(filter(lambda x: len(x)>=4, mask_history))
@@ -1304,32 +1312,75 @@ def mask_analysis(
         
         print_data_header()
 
-    
+    if use_psi4:
+        _, _, _, wfn_full = adbutils.psi4_fullbasis(
+            mol,
+            basis=basis,
+            init_guess=scf_obj_copy.init_guess,
+            dft=dft, xc=xc
+        )
+        # Get coefficient matrices
+        Ca = wfn_full.Ca_subset('AO', 'ALL').to_array(copy=True)
+        if not is_restricted:
+            Cb = wfn_full.Cb_subset('AO', 'ALL').to_array(copy=True)
+            C_full = np.asarray([Ca, Cb])
+        else:
+            C_full = Ca
+        ovlp = wfn_full.S().to_array(copy=True)
+        AOtoSO = wfn_full.aotoso().to_array(copy=True)[0]
+        ovlp = wfn_full.S().to_array(copy=True)[0]
+        ovlp = AOtoSO @ ovlp @ AOtoSO.T
+
     for mask_i, current_val, difference, *init in mask_history:
         if is_smask:
             smask = mask_i
             extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
-            subbasis_mol = Mole(
-                atom = fullbasis_mol.atom, basis = extracted_basis,
-                charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
-                verbose = fullbasis_mol.verbose, unit=fullbasis_mol.unit,
-                ecp = ecp_bas
-                )
-            subbasis_mol.build()
-            submf = scf.HF(subbasis_mol)
             
-            mask = smask_to_mask(smask, fullbasis_mol.cart)
-            maskedF = mask_matrix(fock, mask, RHF)
-            maskedS = mask_matrix(ovlp, mask)
-            maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
-            if not np.allclose(maskedS, submf.get_ovlp()):
-                raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
-            if True:
-                # scf_energy, scf_orbital_energy, subbasis_coeffs = get_sub_scf_attributes(
-                #     subbasis_mol, maskedF, maskedS,
-                #     dft=dft, xc=xc, grid_level=grid_level
-                # )
-                ##### TRYING STUFF OUT
+            if use_psi4:
+                mask = smask_to_mask(smask, fullbasis_mol.cart)
+                
+                subbasis_file = adbutils.subbasis_to_gaussian_file(fullbasis_mol, smask)
+                e_sub, wfn_sub = adbutils.psi4_manual_basis(
+                    fullbasis_mol, subbasis_file, scf_obj_copy.init_guess,
+                    dft=dft, xc=xc)
+                scf_energy = e_sub
+                # Get coefficient matrices
+                Ca = wfn_sub.Ca_subset('AO', 'ALL').to_array(copy=True)
+                if not is_restricted:
+                    Cb = wfn_sub.Cb_subset('AO', 'ALL').to_array(copy=True)
+                    C_sub = np.asarray([Ca, Cb])
+                else:
+                    C_sub = Ca
+                # print(f'{wfn_sub.Cb_subset('AO', 'ALL').to_array()=}')
+                # print(f'{C_full.shape=}')
+                # print(f'{C_sub.shape=}')
+                # print(f'{ovlp[:,mask].shape=}')
+                # print(f'{ovlp.shape=}')
+                # if is_restricted:
+                #     nocc_sb = 2*wfn_sub.nalpha()
+                # else:
+                #     nocc_sb = [wfn_sub.nalpha(), wfn_sub.nbeta()]
+                Q_sqrd= get_q_sqrd(
+                    C_full, C_sub,
+                    ovlp[:,mask], nocc
+                )
+            else:
+                subbasis_mol = Mole(
+                    atom = fullbasis_mol.atom, basis = extracted_basis,
+                    charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
+                    verbose = fullbasis_mol.verbose, unit=fullbasis_mol.unit,
+                    ecp = ecp_bas
+                    )
+                subbasis_mol.build()
+                submf = scf.HF(subbasis_mol)
+                
+                mask = smask_to_mask(smask, fullbasis_mol.cart)
+                maskedF = mask_matrix(fock, mask, is_restricted)
+                maskedS = mask_matrix(ovlp, mask)
+                maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
+                if not np.allclose(maskedS, submf.get_ovlp()):
+                    raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
+
                 if dft:
                     submf = submf.to_ks(xc=xc)
                     submf.grids.level = grid_level
@@ -1341,7 +1392,7 @@ def mask_analysis(
                 submf.kernel(dump_chk=False)
                 scf_energy = submf.e_tot
 
-                if RHF:
+                if is_restricted:
                     nocc_sb = len(submf.mo_occ > 0)
                     scf_orbital_energy = sum(np.sort(submf.mo_energy)[:nocc_sb])
                 else:
@@ -1349,23 +1400,19 @@ def mask_analysis(
                     scf_orbital_energy = .5 * sum(
                         np.sort(submf.mo_energy[0])[:nocc_sb[0]] +
                         np.sort(submf.mo_energy[1])[:nocc_sb[1]])
-                #######
 
                 Q_sqrd= get_q_sqrd(
-                    fullbasis_coeffs, submf.mo_coeffs,
+                    C_full, submf.mo_coeffs,
                     ovlp[:,mask], nocc
                 )
-            else:
-                scf_energy, scf_orbital_energy, subbasis_coeffs = 0.0, 0.0, 0.0
-                Q_sqrd = 0.0
-            
-            if not submf.converged:
-                print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
+                
+                if not submf.converged:
+                    print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
         else:
             mask = mask_i
-            e, subbasis_coeffs = eigh(mask_matrix(fock, mask, RHF=RHF), mask_matrix(ovlp, mask))
+            e, subbasis_coeffs = eigh(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
             Q_sqrd = get_q_sqrd(
-                fullbasis_coeffs, subbasis_coeffs,
+                C_full, subbasis_coeffs,
                 ovlp[:,mask], nocc
             )
         

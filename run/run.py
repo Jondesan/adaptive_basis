@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 import datetime
 from time import time
+import adbutils
 
 AVAIL_INIT_METHODS = [
     'SCF',
@@ -65,14 +66,25 @@ def get_molecules_in_dir(
                 else:
                     charge = 0
                     spin = None
-                mol = gto.M(
-                    atom=fn,
-                    basis=unc + bs,
-                    charge=charge,
-                    spin=spin,
-                    unit=unit,
-                    verbose=0,
-                )
+                try:
+                    mol = gto.M(
+                        atom=fn,
+                        basis=unc + bs,
+                        ecp=unc + bs,
+                        charge=charge,
+                        spin=spin,
+                        unit=unit,
+                        verbose=0,
+                    )
+                except:
+                    mol = gto.M(
+                        atom=fn,
+                        basis=unc + bs,
+                        charge=charge,
+                        spin=spin,
+                        unit=unit,
+                        verbose=0,
+                    )
                 mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
                 smask = adb.init_smask(mol)
                 molecules.append(
@@ -107,7 +119,8 @@ def run_abs(
     dft=False,
     xc='b3lyp',
     grid_level=7,
-    abd_init=False
+    abd_init=True,
+    use_psi4=True
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -137,7 +150,7 @@ def run_abs(
     """
     datacols = ["nfunc", "cursum", "diff", "E_scf", "E_orb", "Qsqrd", "smask"]
 
-    for molfilename, mol, uncmol, shells, init_guess, basisname in mol_list:
+    for molfilename, mol, shellsep_mol, shells, init_guess, basisname in mol_list:
         # Open the output file
         bsname = basisname#mol.basis
         molname = molfilename.split(".")[0]
@@ -159,12 +172,18 @@ def run_abs(
         else:
             myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
         myhf = myhf.apply(scf.addons.remove_linear_dep_)
+        if dft:
+            myhf = myhf.to_ks()
+            myhf.xc = xc
+            myhf.grids.level = grid_level
+            myhf.grids.prune = None
         myhf.eig = adb.eigh
         start = time()
         myhf.kernel()
         end = time()
         fullbasis_hf_time = end - start
         F_scf = myhf.get_fock()
+
 
 
         for ig in init_guess:
@@ -215,18 +234,18 @@ def run_abs(
 
                     if variant == 'enocc':
                         start = time()
-                        maskhistory = adb.find_subspace(
-                            F, S, mol, myhf,
-                            conv_tol=conv_tol,
-                            variant=variant,
-                            return_mask_history=True,
-                            nfunc_normalisation=nfunc_normalisation,
-                            abd_initialization=abd_init
-                        )
-                        data_fbyf = adb.mask_analysis(
-                            maskhistory, mol, myhf,
-                            F, S
-                        )
+                        # maskhistory = adb.find_subspace(
+                        #     F, S, mol, myhf,
+                        #     conv_tol=conv_tol,
+                        #     variant=variant,
+                        #     return_mask_history=True,
+                        #     nfunc_normalisation=nfunc_normalisation,
+                        #     abd_initialization=abd_init
+                        # )
+                        # data_fbyf = adb.mask_analysis(
+                        #     maskhistory, mol, myhf,
+                        #     F, S
+                        # )
                         end = time()
 
                     if variant == 'enocc':
@@ -235,6 +254,7 @@ def run_abs(
                         f.write("{:<15s}".format("-"))
 
                     start = time()
+                    print(adbutils.get_uncontracted_basis(mol))
                     smaskhistory = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
@@ -246,28 +266,38 @@ def run_abs(
                         abd_initialization=abd_init
                     )
                     data_sbys = adb.mask_analysis(
-                        smaskhistory, mol, myhf,
-                        F, S
+                        smaskhistory, shellsep_mol, myhf,
+                        F, S, dft=dft, xc=xc, grid_level=grid_level,
+                        use_psi4=use_psi4
                     )
                     end = time()
 
+                    e_tot = myhf.e_tot
+                    if use_psi4:
+                        e_tot_psi4, docc_full, socc_full, wfn_full = adbutils.psi4_fullbasis(
+                            mol,
+                            basis=basisname,
+                            init_guess=myhf.init_guess,
+                            dft=dft, xc=xc
+                        )
+                        e_tot = e_tot_psi4
                     f.write(f"{end-start:15.9e}\n\n")
 
-                    if variant == 'enocc':
-                        df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
+                    # if variant == 'enocc':
+                    #     df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
                     df_sbys = pd.DataFrame(data_sbys, columns=datacols)
 
                     f.write("{:<15s} {:<30s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
                     f.write(
                         "{:<15d} {:<30.20f} {:<15d}\n\n".format(
-                            np.sum(mol.nelec), myhf.e_tot, mol.nao_nr()
+                            np.sum(mol.nelec), e_tot, mol.nao_nr()
                         )
                     )
 
-                    if variant == 'enocc':
-                        f.write("function-by-function iteration\n")
-                        df_fbyf.to_csv(f, index=False)
-                        f.write("\n\n")
+                    # if variant == 'enocc':
+                        # f.write("function-by-function iteration\n")
+                        # df_fbyf.to_csv(f, index=False)
+                        # f.write("\n\n")
 
                     f.write("shell-by-shell iteration\n")
                     df_sbys.to_csv(f, index=False)
@@ -340,8 +370,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--abd",
         action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Initialize with atomic block decomposition, optional. Default is False.",
+        default=True,
+        help="Initialize with atomic block decomposition, optional. Default is True.",
+    )
+    parser.add_argument(
+        "--use_psi4",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Use Psi4 for SCF calculations instead of PySCF, optional. Default is True.",
     )
 
     args = parser.parse_args()
@@ -359,6 +395,7 @@ if __name__ == "__main__":
     dft = args.dft
     unit = args.unit
     abd_init = args.abd
+    use_psi4 = args.use_psi4
     bs = []
     bstemp = []
 
@@ -390,5 +427,6 @@ if __name__ == "__main__":
         conv_tol=conv_tol,
         sap_basis_sets=sapbasis,
         nfunc_normalisation=nfunc_norm,
-        dft=dft, abd_init=abd_init
+        dft=dft, abd_init=abd_init,
+        use_psi4=use_psi4
         )
