@@ -463,7 +463,7 @@ if __name__ == "__main__":
         help="charge tolerance, default .5"
     )
     parser.add_argument(
-        "--symm_occ_file", type=str, required=False, default='occupations.dat',
+        "--sym_occ_file", type=str, required=False, default='occupations.dat',
         help="path to file with required symmetry occupations."
     )
 
