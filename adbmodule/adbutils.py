@@ -620,8 +620,9 @@ def psi4_fullbasis(
         unique_occs = list(set(occs))
 
         if verbose:
-            print(f'Found the following occupations:\n{'\n\n'.join(
-                map(lambda x: '\n'.join(x), unique_occs))}')
+            occupations_string = '\n\n'.join(map(lambda x: '\n'.join(x), unique_occs))
+            print('Found the following occupations:')
+            print(occupations_string)
             print('Testing which provides lowest converged energy...')
         doccs = []
         for occ in unique_occs:
