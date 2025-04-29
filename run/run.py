@@ -2,6 +2,7 @@
 
 import sys
 import os
+import copy
 import argparse
 
 import adb
@@ -38,11 +39,14 @@ def get_molecules_in_dir(
     molpath: str,
     basis_sets: list,
     get_decontractions: bool = False,
-    unit='Angstrom'
+    unit='Angstrom',
+    symmetry_fname=None
 ):
     """Get molecule xyz files from molpath, can be directory or single file.
     """
     prefix = molpath
+
+
     if os.path.isdir(prefix):
         fs = get_files_in_folder(prefix)
         fs = [prefix + '/' + f for f in fs]
@@ -50,9 +54,17 @@ def get_molecules_in_dir(
         fs = [molpath]
     molecules = []
     for fn in fs:
-        if fn.split("/")[-1][0] == "#":
+        molfname = fn.split("/")[-1]
+        if molfname[0] == "#": # If mol fname starts with #, skip file
             continue
         print(f"reading file {fn}")
+
+        if symmetry_fname is not None:
+            irrep_occs, symm = adbutils.read_symmetry_occs_from_file(
+                symmetry_fname, molfname=molfname)
+        else:
+            symm=True
+
         for bs in basis_sets:
             for unc in (
                 ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
@@ -74,6 +86,7 @@ def get_molecules_in_dir(
                         charge=charge,
                         spin=spin,
                         unit=unit,
+                        symmetry=symm,
                         verbose=0,
                     )
                 except:
@@ -83,8 +96,11 @@ def get_molecules_in_dir(
                         charge=charge,
                         spin=spin,
                         unit=unit,
+                        symmetry=symm,
                         verbose=0,
                     )
+                # if symmetry_fname is not None:
+                #     mol.irrep_name = list(irrep_occs.keys())
                 mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
                 smask = adb.init_smask(mol)
                 molecules.append(
@@ -120,7 +136,8 @@ def run_abs(
     xc='b3lyp',
     grid_level=7,
     abd_init=True,
-    use_psi4=True
+    use_psi4=True,
+    symmetry_occ_fname=None
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -158,16 +175,35 @@ def run_abs(
         spin = mol.spin
         if len(bsname) > 25:
             bsname = "basis_NA"
-
-
+        
         if init_guess is None:
             init_guess = ['atom']
 
         if not os.path.isdir('output'):
             os.mkdir('output')
 
+        is_restricted = mol.spin == 0
+
+        if use_psi4:
+            _, docc, socc, wfn_full, irrep_labels, irrep_symb = adbutils.psi4_fullbasis(
+                mol,
+                basis=basis,
+                init_guess=init_guess,
+                dft=dft, xc=xc
+            )
+            AOCC = wfn_full.nalphapi().to_tuple()
+            BOCC = wfn_full.nbetapi().to_tuple()
+            symmetry_occs = list(zip(irrep_labels, AOCC, BOCC))
+            # Create symmetry occupation dict
+            #             IRREP: 2*alpha                      (alpha, beta)
+            # Example:    'A1':  1                            (2, 2)
+            irrep_nelec = {x[0]: 2*x[1] if is_restricted else (x[1], x[2]) for x in symmetry_occs}
+        if symmetry_occ_fname is not None:
+            irrep_nelec, _ = adbutils.read_symmetry_occs_from_file(
+                symmetry_occ_fname, molfname=molfilename)
+        
         # Set up Hartree-Fock, remove linear dependencies from basis
-        if mol.spin == 0:
+        if is_restricted:
             myhf = mol.RHF()
         else:
             myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
@@ -178,13 +214,19 @@ def run_abs(
             myhf.grids.level = grid_level
             myhf.grids.prune = None
         myhf.eig = adb.eigh
+
+
         start = time()
+        myhf.irrep_nelec = irrep_nelec
         myhf.kernel()
         end = time()
         fullbasis_hf_time = end - start
         F_scf = myhf.get_fock()
 
-
+        # Save the SCF matrices
+        mo_coeff_scf = copy.deepcopy(myhf.mo_coeff)
+        mo_energy_scf = copy.deepcopy(myhf.mo_energy)
+        mo_occ_scf = copy.deepcopy(myhf.mo_occ)
 
         for ig in init_guess:
             if ig == 'sap':
@@ -267,14 +309,16 @@ def run_abs(
                     )
                     data_sbys = adb.mask_analysis(
                         smaskhistory, shellsep_mol, myhf,
+                        #F_scf, S, dft=dft, xc=xc, grid_level=grid_level,
                         F, S, dft=dft, xc=xc, grid_level=grid_level,
-                        use_psi4=use_psi4
+                        use_psi4=use_psi4, molfname=molfilename,
+                        C_full=mo_coeff_scf
                     )
                     end = time()
 
                     e_tot = myhf.e_tot
                     if use_psi4:
-                        e_tot_psi4, docc_full, socc_full, wfn_full = adbutils.psi4_fullbasis(
+                        e_tot_psi4, docc_full, socc_full, wfn_full, irrep_labels = adbutils.psi4_fullbasis(
                             mol,
                             basis=basisname,
                             init_guess=myhf.init_guess,
@@ -303,6 +347,39 @@ def run_abs(
                     df_sbys.to_csv(f, index=False)
                     f.write("\n\n")
 
+
+def run_occupations(
+    mol_list,
+    dft=False,
+    xc='b3lyp',
+    grid_level=7):
+
+    print('molfilename;occs;irrep_symbol')
+    for molfilename, mol, shellsep_mol, shells, init_guess, basisname in mol_list:
+        print(molfilename, end=';')
+        
+        init_guess = 'atom'
+
+        # Set up Hartree-Fock, remove linear dependencies from basis
+        is_restricted = mol.spin == 0
+
+        _, docc, socc, wfn_full, irrep_labels, irrep_symb = adbutils.psi4_fullbasis(
+            mol,
+            basis=basis,
+            init_guess=init_guess,
+            dft=dft, xc=xc
+        )
+        AOCC = wfn_full.nalphapi().to_tuple()
+        BOCC = wfn_full.nbetapi().to_tuple()
+        symmetry_occs = list(zip(irrep_labels, AOCC, BOCC))
+        # Create symmetry occupation dict
+        #             IRREP: 2*alpha                      (alpha, beta)
+        # Example:    'A1':  1                            (2, 2)
+        irrep_nelec = {x[0]: 2*x[1] if is_restricted else (x[1], x[2]) for x in symmetry_occs}
+
+        print(f'{irrep_nelec};{irrep_symb.capitalize().rstrip()}')
+
+    return None
 
 
 if __name__ == "__main__":
@@ -413,13 +490,18 @@ if __name__ == "__main__":
             bs.append(b)
         else:
             bs.append(b)
-    mols = get_molecules_in_dir(molpath, bs, get_decontractions=dec, unit=unit)
+    mols = get_molecules_in_dir(
+        molpath, bs, get_decontractions=dec, unit=unit,
+    symmetry_fname='occupations.dat')
     # print(mols)
     if 'all' in init_guesses:
         init_guesses = AVAIL_INIT_METHODS
     for mol in mols:
         mol[4] = add_initial_guesses(init_guesses, mol[4])
     
+    # run_occupations(
+    #     mols,
+    #     dft=dft, xc='b3lyp')
     run_abs(
         mols,
         variant=variant,
@@ -428,5 +510,6 @@ if __name__ == "__main__":
         sap_basis_sets=sapbasis,
         nfunc_normalisation=nfunc_norm,
         dft=dft, abd_init=abd_init,
-        use_psi4=use_psi4
+        use_psi4=use_psi4,
+        symmetry_occ_fname='occupations.dat'
         )

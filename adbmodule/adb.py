@@ -711,7 +711,8 @@ def create_shell_separated_mol(mol, verbose=0):
     shell_sep_basis = get_uncontracted_basis(mol)
     cmol = gto.M(
         atom=mol.atom, basis=shell_sep_basis,
-        charge=mol.charge, spin=mol.spin, unit=mol.unit,
+        charge=mol.charge, spin=mol.spin,
+        unit=mol.unit, symmetry=mol.symmetry,
         ecp=mol.ecp,
         verbose=0)
     return cmol
@@ -1205,13 +1206,14 @@ def find_subspace(
 def mask_analysis(
     mask_history, mol, scf_obj,
     fock, ovlp, verbose=True,
+    molfname=None,
     basis='def2-tzvp',
     link_shells=True,
     dft=False,
     xc='b3lyp',
     grid_level=7,
-    dm0=None,
     use_psi4=False,
+    C_full=None
     ):
     """Run mask analysis.
 
@@ -1231,7 +1233,8 @@ def mask_analysis(
         verbose : bool
             Whether to print data during analysis. Default is True.
         basis : str
-            Name of the full basis set. Will be used if use_psi4 is True.
+            Name of the full basis set. Will be used in psi4 full
+            basis calculations.
         link_shells : bool
             Whether the shells of same atoms have been linked during ABS
             calculation. Not strictly required even in the case of linked shell
@@ -1246,8 +1249,6 @@ def mask_analysis(
         grid_level : int
             predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
             Optional, default is 3.
-        dm0 : numpy.ndarray
-            The initial guess density matrix
         use_psi4 : bool
             If True, psi4 will be used for SCF computation instead of PySCF.
             Optional, default is False.
@@ -1261,8 +1262,6 @@ def mask_analysis(
     """
     scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
-    if dm0 is None:
-        dm0 = scf_obj_copy.get_init_guess(key=scf_obj_copy.init_guess)
     is_restricted = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
 
@@ -1275,8 +1274,7 @@ def mask_analysis(
         last_smask = init_smask(mol, mol.cart)
     scf_energy = None
     scf_orbital_energy = None
-    C_full = scf_obj_copy.mo_coeff
-
+    
     # Filter mask_history of initialization and ABS
     mask_history_init = list(filter(lambda x: len(x)>=4, mask_history))
     mask_history = list(filter(lambda x: len(x)<=3, mask_history))
@@ -1312,102 +1310,122 @@ def mask_analysis(
         
         print_data_header()
 
+    # If using Psi4, determine occupations on the fly
     if use_psi4:
-        _, _, _, wfn_full = adbutils.psi4_fullbasis(
+        _, docc, socc, wfn_full, irrep_labels, irrep_symb = adbutils.psi4_fullbasis(
             mol,
             basis=basis,
             init_guess=scf_obj_copy.init_guess,
             dft=dft, xc=xc
         )
-        # Get coefficient matrices
-        Ca = wfn_full.Ca_subset('AO', 'ALL').to_array(copy=True)
-        if not is_restricted:
-            Cb = wfn_full.Cb_subset('AO', 'ALL').to_array(copy=True)
-            C_full = np.asarray([Ca, Cb])
-        else:
-            C_full = Ca
-        ovlp = wfn_full.S().to_array(copy=True)
-        AOtoSO = wfn_full.aotoso().to_array(copy=True)[0]
-        ovlp = wfn_full.S().to_array(copy=True)[0]
-        ovlp = AOtoSO @ ovlp @ AOtoSO.T
+        AOCC = wfn_full.nalphapi().to_tuple()
+        BOCC = wfn_full.nbetapi().to_tuple()
+        symmetry_occs = list(zip(irrep_labels, AOCC, BOCC))
+        # Create symmetry occupation dict
+        #             IRREP: 2*alpha                      (alpha, beta)
+        # Example:    'A1':  1                            (2, 2)
+        irrep_nelec = {x[0]: 2*x[1] if is_restricted else (x[1], x[2]) for x in symmetry_occs}
+        if use_psi4:
+            # Get coefficient matrices
+            Ca = wfn_full.Ca_subset('AO', 'ALL').to_array(copy=True)
+            if not is_restricted:
+                Cb = wfn_full.Cb_subset('AO', 'ALL').to_array(copy=True)
+                C_full = np.asarray([Ca, Cb])
+            else:
+                C_full = Ca
+    elif molfname is not None:
+        irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file('occupations.dat', molfname=molfname)
+    else:
+        irrep_symb = True        
 
     for mask_i, current_val, difference, *init in mask_history:
         if is_smask:
             smask = mask_i
             extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
             
-            if use_psi4:
-                mask = smask_to_mask(smask, fullbasis_mol.cart)
+            # if use_psi4:
+            #     mask = smask_to_mask(smask, fullbasis_mol.cart)
                 
-                subbasis_file = adbutils.subbasis_to_gaussian_file(fullbasis_mol, smask)
-                e_sub, wfn_sub = adbutils.psi4_manual_basis(
-                    fullbasis_mol, subbasis_file, scf_obj_copy.init_guess,
-                    dft=dft, xc=xc)
-                scf_energy = e_sub
-                # Get coefficient matrices
-                Ca = wfn_sub.Ca_subset('AO', 'ALL').to_array(copy=True)
-                if not is_restricted:
-                    Cb = wfn_sub.Cb_subset('AO', 'ALL').to_array(copy=True)
-                    C_sub = np.asarray([Ca, Cb])
-                else:
-                    C_sub = Ca
-                # print(f'{wfn_sub.Cb_subset('AO', 'ALL').to_array()=}')
-                # print(f'{C_full.shape=}')
-                # print(f'{C_sub.shape=}')
-                # print(f'{ovlp[:,mask].shape=}')
-                # print(f'{ovlp.shape=}')
-                # if is_restricted:
-                #     nocc_sb = 2*wfn_sub.nalpha()
-                # else:
-                #     nocc_sb = [wfn_sub.nalpha(), wfn_sub.nbeta()]
-                Q_sqrd= get_q_sqrd(
-                    C_full, C_sub,
-                    ovlp[:,mask], nocc
+            #     subbasis_file = adbutils.subbasis_to_gaussian_file(fullbasis_mol, smask)
+            #     e_sub, wfn_sub = adbutils.psi4_manual_basis(
+            #         fullbasis_mol, subbasis_file, scf_obj_copy.init_guess,
+            #         dft=dft, xc=xc)
+            #     scf_energy = e_sub
+            #     # Get coefficient matrices
+            #     Ca = wfn_sub.Ca_subset('AO', 'ALL').to_array(copy=True)
+            #     if not is_restricted:
+            #         Cb = wfn_sub.Cb_subset('AO', 'ALL').to_array(copy=True)
+            #         C_sub = np.asarray([Ca, Cb])
+            #     else:
+            #         C_sub = Ca
+            #     # ovlp_sub = wfn_sub.S().to_array(copy=True)
+            #     # AOtoSO_sub = wfn_sub.aotoso().to_array(copy=True)[0]
+            #     # ovlp_sub = wfn_sub.S().to_array(copy=True)[0]
+            #     # ovlp_sub = AOtoSO_sub @ ovlp_sub @ AOtoSO_sub.T
+
+            #     # TODO: this ovlp comes from psi4 which orders the functions differently:
+            #     # therefore the mask (which uses pyscf ordering) is not correct!
+            #     Q_sqrd = get_q_sqrd(
+            #         C_full, C_sub,
+            #         ovlp[:,mask], nocc
+            #     )
+            # else:
+            subbasis_mol = Mole(
+                atom = fullbasis_mol.atom, basis = extracted_basis,
+                charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
+                verbose = fullbasis_mol.verbose, unit = fullbasis_mol.unit,
+                ecp = ecp_bas, symmetry = irrep_symb
                 )
+            subbasis_mol.build()
+            submf = scf.HF(subbasis_mol)
+            
+            mask = smask_to_mask(smask, fullbasis_mol.cart)
+            maskedF = mask_matrix(fock, mask, is_restricted)
+            maskedS = mask_matrix(ovlp, mask)
+            maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
+            if not np.allclose(maskedS, submf.get_ovlp()):
+                raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
+            if not np.allclose(maskedHcore, submf.get_hcore()):
+                raise RuntimeError('The masked core Hamiltonian and the full core Hamiltonian of masked molecule do not match!')
+
+            if dft:
+                submf = submf.to_ks(xc=xc)
+                submf.grids.level = grid_level
+                submf.grids.prune = None
+
+            # SCF initial guess
+            subbasis_energies, submf.mo_coeff = eigh(maskedF, maskedS)
+            submf.mo_occs = submf.get_occ(subbasis_energies)
+            #print(f'{submf.mol.irrep_name=}')
+            # Set the symmetry occupations if present
+            if irrep_nelec is not None:
+                submf.irrep_nelec = {}
+                for key in irrep_nelec:
+                    if irrep_nelec[key] != 0:
+                        if key not in submf.mol.irrep_name:
+                            raise RuntimeError(f'irrep {key} not found in subbasis')
+                        submf.irrep_nelec[key] = irrep_nelec[key]
             else:
-                subbasis_mol = Mole(
-                    atom = fullbasis_mol.atom, basis = extracted_basis,
-                    charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
-                    verbose = fullbasis_mol.verbose, unit=fullbasis_mol.unit,
-                    ecp = ecp_bas
-                    )
-                subbasis_mol.build()
-                submf = scf.HF(subbasis_mol)
-                
-                mask = smask_to_mask(smask, fullbasis_mol.cart)
-                maskedF = mask_matrix(fock, mask, is_restricted)
-                maskedS = mask_matrix(ovlp, mask)
-                maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
-                if not np.allclose(maskedS, submf.get_ovlp()):
-                    raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
+                print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
+            submf.kernel(dump_chk=False)
+            scf_energy = submf.e_tot
+ 
+            if is_restricted:
+                nocc_sb = len(submf.mo_occ > 0)
+                scf_orbital_energy = sum(submf.mo_energy[:nocc_sb])
+            else:
+                nocc_sb = [len(submf.mo_occ[0] > 0), len(submf.mo_occ[1] > 0)]
+                scf_orbital_energy = .5 * sum(
+                    submf.mo_energy[0][:nocc_sb[0]] +
+                    submf.mo_energy[1][:nocc_sb[1]])
 
-                if dft:
-                    submf = submf.to_ks(xc=xc)
-                    submf.grids.level = grid_level
-                    submf.grids.prune = None
-
-                # SCF initial guess
-                subbasis_energies, submf.mo_coeffs = eigh(maskedF, maskedS)
-                submf.mo_occs = submf.get_occ(subbasis_energies)
-                submf.kernel(dump_chk=False)
-                scf_energy = submf.e_tot
-
-                if is_restricted:
-                    nocc_sb = len(submf.mo_occ > 0)
-                    scf_orbital_energy = sum(np.sort(submf.mo_energy)[:nocc_sb])
-                else:
-                    nocc_sb = [len(submf.mo_occ[0] > 0), len(submf.mo_occ[1] > 0)]
-                    scf_orbital_energy = .5 * sum(
-                        np.sort(submf.mo_energy[0])[:nocc_sb[0]] +
-                        np.sort(submf.mo_energy[1])[:nocc_sb[1]])
-
-                Q_sqrd= get_q_sqrd(
-                    C_full, submf.mo_coeffs,
-                    ovlp[:,mask], nocc
-                )
-                
-                if not submf.converged:
-                    print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
+            Q_sqrd = get_q_sqrd(
+                C_full, submf.mo_coeff,
+                ovlp[:,mask], nocc
+            )
+            
+            if not submf.converged:
+                print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
         else:
             mask = mask_i
             e, subbasis_coeffs = eigh(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
