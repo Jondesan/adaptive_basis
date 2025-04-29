@@ -515,7 +515,8 @@ def run_psi4(
         unique_occs = list(set(occs))
         
         occupations_string = '\n\n'.join(map(lambda x: '\n'.join(x), unique_occs))
-        print(f'Found the following occupations:\n{occupations_string}')
+        print('Found the following occupations:')
+        print(occupations_string)
         print('Testing which provides lowest converged energy...')
         doccs = []
         for occ in unique_occs:
