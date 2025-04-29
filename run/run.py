@@ -137,7 +137,8 @@ def run_abs(
     grid_level=7,
     abd_init=True,
     use_psi4=True,
-    symmetry_occ_fname=None
+    symmetry_occ_fname=None,
+    q_tol=1.0
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -305,7 +306,8 @@ def run_abs(
                         link_shells=lshells,
                         nfunc_normalisation=nfunc_normalisation,
                         return_mask_history=True,
-                        abd_initialization=abd_init
+                        abd_initialization=abd_init,
+                        abd_Q_tol=q_tol
                     )
                     data_sbys = adb.mask_analysis(
                         smaskhistory, shellsep_mol, myhf,
@@ -453,8 +455,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--use_psi4",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Use Psi4 for SCF calculations instead of PySCF, optional. Default is True.",
+    )
+    parser.add_argument(
+        "--q_tol", type=float, required=False, default=.5,
+        help="charge tolerance, default .5"
     )
 
     args = parser.parse_args()
@@ -473,6 +479,7 @@ if __name__ == "__main__":
     unit = args.unit
     abd_init = args.abd
     use_psi4 = args.use_psi4
+    q_tol = args.q_tol
     bs = []
     bstemp = []
 
@@ -511,5 +518,6 @@ if __name__ == "__main__":
         nfunc_normalisation=nfunc_norm,
         dft=dft, abd_init=abd_init,
         use_psi4=use_psi4,
-        symmetry_occ_fname='occupations.dat'
+        symmetry_occ_fname='occupations.dat',
+        q_tol=q_tol
         )
