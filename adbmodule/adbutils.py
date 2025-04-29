@@ -514,8 +514,8 @@ def run_psi4(
         # determine which has lowest converged energy
         unique_occs = list(set(occs))
 
-        print(f'Found the following occupations:\n{'\n\n'.join(
-            map(lambda x: '\n'.join(x), unique_occs))}')
+        print(f'Found the following occupations:\n{"\n\n".join(
+            map(lambda x: "\n".join(x), unique_occs))}')
         print('Testing which provides lowest converged energy...')
         doccs = []
         for occ in unique_occs:
