@@ -462,6 +462,10 @@ if __name__ == "__main__":
         "--q_tol", type=float, required=False, default=.5,
         help="charge tolerance, default .5"
     )
+    parser.add_argument(
+        "--symm_occ_file", type=str, required=False, default='occupations.dat',
+        help="path to file with required symmetry occupations."
+    )
 
     args = parser.parse_args()
 
@@ -480,6 +484,7 @@ if __name__ == "__main__":
     abd_init = args.abd
     use_psi4 = args.use_psi4
     q_tol = args.q_tol
+    sym_occ_file = args.sym_occ_file
     bs = []
     bstemp = []
 
@@ -506,6 +511,8 @@ if __name__ == "__main__":
     for mol in mols:
         mol[4] = add_initial_guesses(init_guesses, mol[4])
     
+    if not os.path.isfile(sym_occ_file):
+        RuntimeError(f'Path {sym_occ_file} is not a valid file.')
     # run_occupations(
     #     mols,
     #     dft=dft, xc='b3lyp')
@@ -518,6 +525,6 @@ if __name__ == "__main__":
         nfunc_normalisation=nfunc_norm,
         dft=dft, abd_init=abd_init,
         use_psi4=use_psi4,
-        symmetry_occ_fname='occupations.dat',
+        symmetry_occ_fname=sym_occ_file,
         q_tol=q_tol
         )
