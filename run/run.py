@@ -248,9 +248,9 @@ def run_abs(
             for sapbs in sapbases:
                 if ig == 'sap':
                     sapbasisname = sapbs.strip().split('/')[-1].split('.')[0]
-                    fname = ".".join([molname, bsname, ig, sapbasisname])
+                    fname = ".".join([molname, f'charge{charge}', f'spin{spin}', bsname, ig, sapbasisname])
                 else:
-                    fname = ".".join([molname, bsname, ig])
+                    fname = ".".join([molname, f'charge{charge}', f'spin{spin}', bsname, ig])
                 if not lshells:
                     fname = ".".join([fname, 'unlinked'])
                 with open(f'output/{fname}.out', "w") as f:
