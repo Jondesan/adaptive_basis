@@ -1206,6 +1206,7 @@ def find_subspace(
 def mask_analysis(
     mask_history, mol, scf_obj,
     fock, ovlp, verbose=True,
+    sym_occ_fname='occupations.dat',
     molfname=None,
     basis='def2-tzvp',
     link_shells=True,
@@ -1334,7 +1335,7 @@ def mask_analysis(
             else:
                 C_full = Ca
     elif molfname is not None:
-        irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file('occupations.dat', molfname=molfname)
+        irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file(sym_occ_fname, molfname=molfname)
     else:
         irrep_symb = True        
 
@@ -1396,7 +1397,6 @@ def mask_analysis(
             # SCF initial guess
             subbasis_energies, submf.mo_coeff = eigh(maskedF, maskedS)
             submf.mo_occs = submf.get_occ(subbasis_energies)
-            #print(f'{submf.mol.irrep_name=}')
             # Set the symmetry occupations if present
             if irrep_nelec is not None:
                 submf.irrep_nelec = {}
