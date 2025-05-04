@@ -218,7 +218,17 @@ def run_abs(
 
 
         start = time()
-        myhf.irrep_nelec = irrep_nelec
+        # Set the symmetry occupations if present
+        if irrep_nelec is not None:
+            myhf.irrep_nelec = {}
+            for key in irrep_nelec:
+                if irrep_nelec[key] != 0:
+                    if key not in myhf.mol.irrep_name:
+                        raise RuntimeError(f'irrep {key} not found in subbasis')
+                    myhf.irrep_nelec[key] = irrep_nelec[key]
+        else:
+            print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
+
         myhf.kernel()
         end = time()
         fullbasis_hf_time = end - start
