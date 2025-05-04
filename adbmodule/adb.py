@@ -776,7 +776,7 @@ def set_linked_shells(smask, val):
     return copysmask
 
 
-def mask_matrix(mat, mask, RHF=True):
+def mask_matrix(mat, mask, is_restricted=True):
     """Return masked matrix
 
     Args:
@@ -798,8 +798,8 @@ def mask_matrix(mat, mask, RHF=True):
     # print(f'{mat.shape=}')
     # if RHF != (len(mat.shape) == 2):
     #     raise RuntimeError("")
-    RHF = (len(mat.shape) == 2)
-    return mat[mask, :][:, mask] if RHF else mat[:, mask, :][:, :, mask]
+    is_restricted = (len(mat.shape) == 2)
+    return mat[mask, :][:, mask] if is_restricted else mat[:, mask, :][:, :, mask]
 
 
 def basis_functions_per_atom(mol):
