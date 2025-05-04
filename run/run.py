@@ -314,6 +314,7 @@ def run_abs(
                         #F_scf, S, dft=dft, xc=xc, grid_level=grid_level,
                         F, S, dft=dft, xc=xc, grid_level=grid_level,
                         use_psi4=use_psi4, molfname=molfilename,
+                        sym_occ_fname=symmetry_occ_fname,
                         C_full=mo_coeff_scf
                     )
                     end = time()
