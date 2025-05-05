@@ -470,8 +470,8 @@ if __name__ == "__main__":
         help="Use Psi4 for SCF calculations instead of PySCF, optional. Default is True.",
     )
     parser.add_argument(
-        "--q_tol", type=float, required=False, default=.5,
-        help="charge tolerance, default .5"
+        "--q_tol", type=float, required=False, default=1.0,
+        help="charge tolerance, default 1.0"
     )
     parser.add_argument(
         "--sym_occ_file", type=str, required=False, default='occupations.dat',
