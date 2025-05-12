@@ -231,6 +231,7 @@ def run_abs(
 
         myhf.kernel()
         end = time()
+        e_tot = myhf.e_tot
         fullbasis_hf_time = end - start
         F_scf = myhf.get_fock()
 
@@ -329,7 +330,6 @@ def run_abs(
                     )
                     end = time()
 
-                    e_tot = myhf.e_tot
                     if use_psi4:
                         e_tot_psi4, docc_full, socc_full, wfn_full, irrep_labels = adbutils.psi4_fullbasis(
                             mol,
