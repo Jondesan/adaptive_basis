@@ -214,7 +214,7 @@ def run_abs(
             myhf.xc = xc
             myhf.grids.level = grid_level
             myhf.grids.prune = None
-        myhf.eig = adb.eigh
+        # myhf.eig = adb.eigh
 
 
         start = time()
