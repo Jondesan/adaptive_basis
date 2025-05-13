@@ -1419,10 +1419,16 @@ def mask_analysis(
                     submf.mo_energy[0][:nocc_sb[0]] +
                     submf.mo_energy[1][:nocc_sb[1]])
 
-            Q_sqrd = get_q_sqrd(
-                C_full, submf.mo_coeff,
-                ovlp[:,mask], nocc
-            )
+            if is_restricted:
+                Q_sqrd = get_q_sqrd(
+                    C_full, submf.mo_coeff,
+                    ovlp[:,mask], nocc
+                )
+            else:
+                Q_sqrd = get_q_sqrd(
+                    np.asarray(C_full), np.asarray(submf.mo_coeff),
+                    ovlp[:,mask], nocc
+                )
             
             if not submf.converged:
                 print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
