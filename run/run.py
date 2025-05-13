@@ -224,7 +224,7 @@ def run_abs(
             for key in irrep_nelec:
                 if irrep_nelec[key] != 0:
                     if key not in myhf.mol.irrep_name:
-                        raise RuntimeError(f'irrep {key} not found in subbasis')
+                        raise RuntimeError(f'irrep {key} not found in subbasis:\n{myhf.mol.irrep_name}')
                     myhf.irrep_nelec[key] = irrep_nelec[key]
         else:
             print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
