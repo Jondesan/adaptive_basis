@@ -374,6 +374,7 @@ def run_atomic_block_decomp_on_molecule_set(
         ):
         
     with open(output, 'w', buffering=1) as f:
+        f.write('molname\tinit_guess\tbasis\tnfuncs_abd\tnfunc_full\tqtol\tspin\tcharge\n')
         for molfilename, mol, uncmol, shells, init_guesses, basisname in mols:
             for init_guess in init_guesses:
                 if init_guess == 'scf':
@@ -419,7 +420,7 @@ def run_atomic_block_decomp_on_molecule_set(
                     print(molfilename, init_guess, basisname, np.sum(minimal_basis_mask), uncmol.nao_nr())
 
                     f.write(f'{molfilename.split(".")[0]:20s}\t{init_guess:20s}\t{basisname:20s}\t')
-                    f.write(f'{np.sum(minimal_basis_mask)}\t{uncmol.nao_nr()}\t{q_tol}\n')
+                    f.write(f'{np.sum(minimal_basis_mask)}\t{uncmol.nao_nr()}\t{q_tol}\t{mol.spin}\t{mol.charge}\n')
 
 
 def run_occupations(
