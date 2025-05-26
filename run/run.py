@@ -14,7 +14,7 @@ from time import time
 import adbutils
 
 AVAIL_INIT_METHODS = [
-    'SCF',
+    'scf',
     'atom',
     'sap',
     'huckel',
@@ -241,6 +241,7 @@ def run_abs(
         mo_occ_scf = copy.deepcopy(myhf.mo_occ)
 
         for ig in init_guess:
+            print(f'Running calculation for mol {molfilename}, with basis {basisname} and init guess {ig}')
             if ig == 'sap':
                 sapbases = np.asarray(sap_basis_sets)
             else:
@@ -270,7 +271,9 @@ def run_abs(
 
                     dm0=None
                     start = time()
-                    if ig == 'SCF':
+                    # Based on the initial guess, get the Fock matrix which
+                    # is used as the initial guess in the subbasis
+                    if ig == 'scf':
                         F = F_scf
                     else:
                         if ig == 'vsap':
@@ -282,6 +285,7 @@ def run_abs(
                         F = myhf.get_fock(dm=dm0)
                     end = time()
                     S = myhf.get_ovlp()
+
                     f.write("time stats [s]\n")
                     f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
                     f.write(f"{(fullbasis_hf_time + end - start):15.9e}  ")
@@ -308,7 +312,6 @@ def run_abs(
                         f.write("{:<15s}".format("-"))
 
                     start = time()
-                    print(adbutils.get_uncontracted_basis(mol))
                     smaskhistory = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
@@ -359,6 +362,64 @@ def run_abs(
                     f.write("shell-by-shell iteration\n")
                     df_sbys.to_csv(f, index=False)
                     f.write("\n\n")
+
+
+def run_atomic_block_decomp_on_molecule_set(
+        mol,
+        q_tol=1.0,
+        output='atomic_block_decomp.output',
+        run_dft=False,
+        sap_basis_sets=['sapgraspsmall'],
+        ):
+        
+    with open(output, 'w', buffering=1) as f:
+        for molfilename, mol, uncmol, shells, init_guesses, basisname in mols:
+            for init_guess in init_guesses:
+                if init_guess == 'scf':
+                    continue
+                xcfunc = 'PBE'
+                grid_level = 7
+
+                mf = dft.KS(mol) if run_dft else scf.HF(mol)
+                if run_dft:
+                    mf.grids.level = grid_level
+                    mf.xc = xcfunc
+                    mf.grids.prune = None
+                
+                # Initialize init guess method
+                mf.init_guess = init_guess
+
+                # This produces the initial guess density matrix
+                # dm0 = mf.get_init_guess(key=init_guess)
+                if init_guess == 'sap':
+                    sapbases = np.asarray(sap_basis_sets)
+                else:
+                    sapbases = [None]
+
+                for sapbs in sapbases:
+                    if init_guess == 'vsap':
+                        tempmf = mol.KS().set(xc='b3lyp')
+                        dm0 = tempmf.get_init_guess(key='vsap')
+                    else:
+                        mf.sap_basis = sapbs
+                        dm0 = mf.get_init_guess(key=init_guess)
+                    F = mf.get_fock(dm=dm0)
+                    # we need the corresponding Fock matrix
+                    F = mf.get_fock(dm=dm0)
+                    S = mf.get_ovlp()
+                    # This gives the initial guess density matrix for the mf object
+                    mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
+                    mf.mo_occs = mf.get_occ(mf.mo_energy)
+                    
+                    minimal_basis_mask = adb.atomic_block_minimal_basis(
+                        mol, F, S, Q_tol=q_tol, by_shell=True,
+                        get_mask_history=False, verbose=False
+                    )
+
+                    print(molfilename, init_guess, basisname, np.sum(minimal_basis_mask), uncmol.nao_nr())
+
+                    f.write(f'{molfilename.split(".")[0]:20s}\t{init_guess:20s}\t{basisname:20s}\t')
+                    f.write(f'{np.sum(minimal_basis_mask)}\t{uncmol.nao_nr()}\n')
 
 
 def run_occupations(
@@ -474,8 +535,15 @@ if __name__ == "__main__":
         help="charge tolerance, default 1.0"
     )
     parser.add_argument(
-        "--sym_occ_file", type=str, required=False, default='occupations.dat',
+        "--sym_occ_file", type=str, required=False, default=None,
         help="path to file with required symmetry occupations."
+    )
+    parser.add_argument(
+        "--run_mode",
+        type=str,
+        default='abs',
+        choices=['abs', 'occs', 'abd'],
+        help="Run mode, optional. Default is 'abs'.",
     )
 
     args = parser.parse_args()
@@ -496,6 +564,7 @@ if __name__ == "__main__":
     use_psi4 = args.use_psi4
     q_tol = args.q_tol
     sym_occ_file = args.sym_occ_file
+    run_mode = args.run_mode
     bs = []
     bstemp = []
 
@@ -513,29 +582,43 @@ if __name__ == "__main__":
             bs.append(b)
         else:
             bs.append(b)
+        
+    if sym_occ_file is not None:
+        if not os.path.isfile(sym_occ_file):
+            RuntimeError(f'Path {sym_occ_file} is not a valid file.')
+    
     mols = get_molecules_in_dir(
         molpath, bs, get_decontractions=dec, unit=unit,
-    symmetry_fname='occupations.dat')
-    # print(mols)
+        symmetry_fname=sym_occ_file)
+
     if 'all' in init_guesses:
         init_guesses = AVAIL_INIT_METHODS
+
     for mol in mols:
         mol[4] = add_initial_guesses(init_guesses, mol[4])
     
-    if not os.path.isfile(sym_occ_file):
-        RuntimeError(f'Path {sym_occ_file} is not a valid file.')
-    # run_occupations(
-    #     mols,
-    #     dft=dft, xc='b3lyp')
-    run_abs(
-        mols,
-        variant=variant,
-        lshells=lshells,
-        conv_tol=conv_tol,
-        sap_basis_sets=sapbasis,
-        nfunc_normalisation=nfunc_norm,
-        dft=dft, abd_init=abd_init,
-        use_psi4=use_psi4,
-        symmetry_occ_fname=sym_occ_file,
-        q_tol=q_tol
-        )
+    
+    match run_mode:
+        case 'abs':
+            run_abs(
+                mols,
+                variant=variant,
+                lshells=lshells,
+                conv_tol=conv_tol,
+                sap_basis_sets=sapbasis,
+                nfunc_normalisation=nfunc_norm,
+                dft=dft, abd_init=abd_init,
+                use_psi4=use_psi4,
+                symmetry_occ_fname=sym_occ_file,
+                q_tol=q_tol
+                )
+        case 'occs':
+            run_occupations(
+                mols,
+                dft=dft, xc='b3lyp')
+        case 'abd':
+            run_atomic_block_decomp_on_molecule_set(
+                mols,
+                q_tol=q_tol,
+                run_dft=dft
+            )
