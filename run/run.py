@@ -419,7 +419,7 @@ def run_atomic_block_decomp_on_molecule_set(
                     print(molfilename, init_guess, basisname, np.sum(minimal_basis_mask), uncmol.nao_nr())
 
                     f.write(f'{molfilename.split(".")[0]:20s}\t{init_guess:20s}\t{basisname:20s}\t')
-                    f.write(f'{np.sum(minimal_basis_mask)}\t{uncmol.nao_nr()}\n')
+                    f.write(f'{np.sum(minimal_basis_mask)}\t{uncmol.nao_nr()}\t{q_tol}\n')
 
 
 def run_occupations(
@@ -545,6 +545,12 @@ if __name__ == "__main__":
         choices=['abs', 'occs', 'abd'],
         help="Run mode, optional. Default is 'abs'.",
     )
+    parser.add_argument(
+        "--output_file_name",
+        type=str,
+        default='output.dat',
+        help="Ouput file name for 'abd' run mode. Default 'output.dat'"
+    )
 
     args = parser.parse_args()
 
@@ -565,6 +571,7 @@ if __name__ == "__main__":
     q_tol = args.q_tol
     sym_occ_file = args.sym_occ_file
     run_mode = args.run_mode
+    output_file_name = args.output_file_name
     bs = []
     bstemp = []
 
@@ -620,5 +627,6 @@ if __name__ == "__main__":
             run_atomic_block_decomp_on_molecule_set(
                 mols,
                 q_tol=q_tol,
-                run_dft=dft
+                run_dft=dft,
+                output=output_file_name
             )
