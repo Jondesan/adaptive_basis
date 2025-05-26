@@ -78,6 +78,7 @@ def get_molecules_in_dir(
                 else:
                     charge = 0
                     spin = None
+
                 try:
                     mol = gto.M(
                         atom=fn,
@@ -398,8 +399,7 @@ def run_atomic_block_decomp_on_molecule_set(
 
                 for sapbs in sapbases:
                     if init_guess == 'vsap':
-                        tempmf = mol.KS().set(xc='b3lyp')
-                        dm0 = tempmf.get_init_guess(key='vsap')
+                        continue
                     else:
                         mf.sap_basis = sapbs
                         dm0 = mf.get_init_guess(key=init_guess)
@@ -589,7 +589,7 @@ if __name__ == "__main__":
             bs.append(b)
         else:
             bs.append(b)
-        
+
     if sym_occ_file is not None:
         if not os.path.isfile(sym_occ_file):
             RuntimeError(f'Path {sym_occ_file} is not a valid file.')
