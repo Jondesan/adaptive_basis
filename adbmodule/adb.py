@@ -795,9 +795,6 @@ def mask_matrix(mat, mask, is_restricted=True):
         masked_mat : ndarray
             The masked matrix
     """
-    # print(f'{mat.shape=}')
-    # if RHF != (len(mat.shape) == 2):
-    #     raise RuntimeError("")
     is_restricted = (len(mat.shape) == 2)
     return mat[mask, :][:, mask] if is_restricted else mat[:, mask, :][:, :, mask]
 
@@ -987,12 +984,6 @@ def atomic_block_minimal_basis(
                     S_atom[:, mask_atom].copy(),
                     (nocca, noccb),
                     )
-                # Teekkarin debugger ###########################
-                # tempmaskarr = np.zeros(len(full_mask))
-                # tempmaskarr[func_offset + Pat_i] = True
-                # shell_idx = maskidx_to_smaskidx(tempmaskarr, smask)[func_offset + Pat_i]
-                # tk_debugger(f'{get_atom_shell_label(mol, shell_idx)}: {Q=:.14f}, {np.abs(Q - Qlim)=:.14f}, {eps=}')
-                # Teekkarin debugger ###########################
             else:
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
                 P_atom[Pat_i, Pat_j] = 0
