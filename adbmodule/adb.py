@@ -860,6 +860,7 @@ def atomic_block_minimal_basis(
     get_mask_history=True,
     link_shells=False,
     verbose=True,
+    spherically_average_fock=True,
 ):
     """Create minimal basis from atomic block decomposition.
     """
@@ -897,7 +898,8 @@ def atomic_block_minimal_basis(
         # TODO: fix the shell array (currently for whole mol, not just atomic block)
         F_ave = F_atom.copy()
         #smask_atom = [sm for sm in smask if sm[3][0] == i]
-        F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
+        if spherically_average_fock:
+            F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
 
         e_atom, c_atom = eigh(F_ave, S_atom.copy())
 
