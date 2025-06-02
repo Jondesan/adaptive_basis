@@ -371,6 +371,7 @@ def run_atomic_block_decomp_on_molecule_set(
         output='atomic_block_decomp.output',
         run_dft=False,
         sap_basis_sets=['sapgraspsmall'],
+        spherically_average_fock=True,
         ):
         
     with open(output, 'w', buffering=1) as f:
@@ -414,7 +415,8 @@ def run_atomic_block_decomp_on_molecule_set(
                     
                     minimal_basis_mask = adb.atomic_block_minimal_basis(
                         mol, F, S, Q_tol=q_tol, by_shell=True,
-                        get_mask_history=False, verbose=False
+                        get_mask_history=False, verbose=False,
+                        spherically_average_fock=spherically_average_fock,
                     )
 
                     print(molfilename, init_guess, basisname, np.sum(minimal_basis_mask), uncmol.nao_nr())
@@ -529,7 +531,7 @@ if __name__ == "__main__":
         "--use_psi4",
         action=argparse.BooleanOptionalAction,
         default=False,
-        help="Use Psi4 for SCF calculations instead of PySCF, optional. Default is True.",
+        help="Use Psi4 for SCF calculations instead of PySCF, optional. Default is False.",
     )
     parser.add_argument(
         "--q_tol", type=float, required=False, default=1.0,
@@ -552,6 +554,12 @@ if __name__ == "__main__":
         default='output.dat',
         help="Ouput file name for 'abd' run mode. Default 'output.dat'"
     )
+    parser.add_argument(
+        "--sph_avg_fock",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Spherically average the Fock matrix when running atomic block decomposition, optional. Default is True.",
+    )
 
     args = parser.parse_args()
 
@@ -573,6 +581,7 @@ if __name__ == "__main__":
     sym_occ_file = args.sym_occ_file
     run_mode = args.run_mode
     output_file_name = args.output_file_name
+    sph_avg_fock = args.sph_avg_fock
     bs = []
     bstemp = []
 
@@ -629,5 +638,6 @@ if __name__ == "__main__":
                 mols,
                 q_tol=q_tol,
                 run_dft=dft,
-                output=output_file_name
+                output=output_file_name,
+                spherically_average_fock=sph_avg_fock,
             )
