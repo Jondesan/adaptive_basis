@@ -20,7 +20,6 @@ import numpy as np
 import pandas as pd
 import datetime
 from time import time
-import psi4
 from copy import deepcopy
 import re
 from ast import literal_eval
@@ -474,6 +473,7 @@ def run_psi4(
         basis,
         init_guess,
         dft=True):
+    import psi4
     with open(mol.atom) as f:
         xyz = f.read()
     psi4mol = psi4.geometry(xyz)
@@ -563,6 +563,7 @@ def psi4_fullbasis(
         dft=True,
         xc='B3LYP',
         verbose=False):
+    import psi4
     
     init_guess = {
         'minao': 'atom', 
@@ -646,6 +647,8 @@ def psi4_fullbasis(
 
 
 def pyscf_mol_to_psi4(mol):
+    import psi4
+
     with open(mol.atom) as f:
         xyz = f.read()
     psi4mol = psi4.geometry(xyz)
@@ -666,6 +669,7 @@ def psi4_manual_basis(
         init_guess,
         dft=True,
         xc='B3LYP'):
+    import psi4
     
     init_guess = {
         'minao': 'atom', 
