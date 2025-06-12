@@ -136,6 +136,9 @@ def read_symmetry_occs_from_file(fname: str, molfname: str):
 
     """
     
+    if fname is None or not os.path.isfile(fname):
+        return None, None
+    
     file = None
     with open(fname, 'r') as f:
         file = f.readlines()

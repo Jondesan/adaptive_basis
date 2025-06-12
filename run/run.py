@@ -175,6 +175,8 @@ def run_abs(
         molname = molfilename.split(".")[0]
         charge = mol.charge
         spin = mol.spin
+        irrep_nelec = None
+        
         if len(bsname) > 25:
             bsname = "basis_NA"
         
@@ -228,7 +230,9 @@ def run_abs(
                         raise RuntimeError(f'irrep {key} not found in subbasis:\n{myhf.mol.irrep_name}')
                     myhf.irrep_nelec[key] = irrep_nelec[key]
         else:
-            print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
+            print('Symmetry occupations not set explicitly!' \
+                + ' This may cause convergence issues.',
+                file=sys.stderr)
 
         myhf.kernel()
         end = time()
@@ -444,7 +448,7 @@ def run_occupations(
             mol,
             basis=basis,
             init_guess=init_guess,
-            dft=dft, xc=xc
+            dft=dft, xc=xc, verbose=True
         )
         AOCC = wfn_full.nalphapi().to_tuple()
         BOCC = wfn_full.nbetapi().to_tuple()

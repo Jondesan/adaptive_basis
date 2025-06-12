@@ -1329,6 +1329,8 @@ def mask_analysis(
                 C_full = Ca
     elif molfname is not None:
         irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file(sym_occ_fname, molfname=molfname)
+        if irrep_nelec is None:
+            irrep_symb = True
     else:
         irrep_symb = True        
 
