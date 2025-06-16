@@ -379,7 +379,8 @@ def run_atomic_block_decomp_on_molecule_set(
         ):
         
     with open(output, 'w', buffering=1) as f:
-        f.write('molname\tinit_guess\tbasis\tnfuncs_abd\tnfunc_full\tqtol\tspin\tcharge\n')
+        f.write('molname;init_guess;basis;nfuncs_abd;nfunc_full;qtol' + \
+                ';spin;charge;nfuncs_abs;e_minimal;e_abs\n')
         for molfilename, mol, uncmol, shells, init_guesses, basisname in mols:
             for init_guess in init_guesses:
                 if init_guess == 'scf':
@@ -423,10 +424,39 @@ def run_atomic_block_decomp_on_molecule_set(
                         spherically_average_fock=spherically_average_fock,
                     )
 
-                    print(molfilename, init_guess, basisname, np.sum(minimal_basis_mask), uncmol.nao_nr())
+                    minimal_basis_smask = adb.init_smask(mol, mol.cart)
+                    minimal_basis_smask = adb.mask_to_smask(minimal_basis_mask, minimal_basis_smask, mol.cart)
+                    minimal_basis_mol = adb.create_subbasis_mol(mol, minimal_basis_smask)
+                    mbmf = dft.KS(minimal_basis_mol) if run_dft else scf.HF(minimal_basis_mol)
+                    if run_dft:
+                        mbmf.grids.level = grid_level
+                        mbmf.xc = xcfunc
+                        mbmf.grids.prune = None
+                    mbmf.kernel()
+                    e_minimal_basis = mbmf.e_tot
+                    nfunc_minimal = np.sum(minimal_basis_mask)
 
-                    f.write(f'{molfilename.split(".")[0]:20s}\t{init_guess:20s}\t{basisname:20s}\t')
-                    f.write(f'{np.sum(minimal_basis_mask)}\t{uncmol.nao_nr()}\t{q_tol}\t{mol.spin}\t{mol.charge}\n')
+                    abs_smask = adb.find_subspace(F, S, mol, mf, conv_tol=1e-1,
+                                                  get_smask=True,
+                                                  spherical_average=spherically_average_fock,
+                                                  abd_Q_tol=q_tol)
+                    abs_mask = adb.smask_to_mask(abs_smask, cart=mol.cart)
+                    nfunc_abs = np.sum(abs_mask)
+                    subbasis_mol = adb.create_subbasis_mol(mol, abs_smask)
+                    sbmf = dft.KS(subbasis_mol) if run_dft else scf.HF(subbasis_mol)
+                    if run_dft:
+                        sbmf.grids.level = grid_level
+                        sbmf.xc = xcfunc
+                        sbmf.grids.prune = None
+                    sbmf.kernel()
+                    e_subbasis = sbmf.e_tot
+
+                    print(molfilename, init_guess, basisname, nfunc_minimal, \
+                          uncmol.nao_nr(), nfunc_abs, e_minimal_basis, e_subbasis)
+
+                    f.write(f'{molfilename.split(".")[0]};{init_guess};{basisname};')
+                    f.write(f'{nfunc_minimal};{uncmol.nao_nr()};{q_tol};{mol.spin};{mol.charge};')
+                    f.write(f'{nfunc_abs};{e_minimal_basis:.12f};{e_subbasis:.12f}\n')
 
 
 def run_occupations(
