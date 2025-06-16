@@ -706,6 +706,19 @@ def get_sub_scf_attributes(
     return scf_energy, scf_orbital_energy, mf.mo_coeff
 
 
+def create_subbasis_mol(mol, smask):
+    extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(mol))
+    subbasis_mol = Mole(
+        atom = mol.atom, basis = extracted_basis,
+        charge = mol.charge, spin = mol.spin,
+        verbose = mol.verbose, unit = mol.unit,
+        ecp = ecp_bas, symmetry = mol.symmetry
+    )
+    subbasis_mol.build()
+    
+    return subbasis_mol
+
+
 def create_shell_separated_mol(mol, verbose=0):
     """Creates a copy of mol with shells separated."""
     shell_sep_basis = get_uncontracted_basis(mol)
@@ -897,7 +910,6 @@ def atomic_block_minimal_basis(
         
         # TODO: fix the shell array (currently for whole mol, not just atomic block)
         F_ave = F_atom.copy()
-        #smask_atom = [sm for sm in smask if sm[3][0] == i]
         if spherically_average_fock:
             F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
 
@@ -908,10 +920,8 @@ def atomic_block_minimal_basis(
             while nfuncs_include < funcs \
             and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
                 nfuncs_include += 1
-            #print(f'{energies=} {nfuncs_include=} {energies[nfuncs_include+1]-energies[nfunc_per_minimal_atom]=}')
             return nfuncs_include
 
-        # print(f'{nfunc_per_minimal_atom=}')
         if verbose:
             with np.printoptions(precision=2, suppress=True):
                 print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
@@ -922,7 +932,6 @@ def atomic_block_minimal_basis(
             occs[:number_of_states(e_atom)] = 2
             Qlim = 2*number_of_states(e_atom)
             nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
-            # P_atom = np.abs(c_atom @ np.diag(occs) @ c_atom.conj().T)
             P_atom = np.abs(
                 np.einsum('ik,kj,lj->il', c_atom, np.diag(occs), c_atom.conj())
             )
@@ -1012,6 +1021,7 @@ def find_subspace(
     return_mask_history=False,
     mask_cutoff=None,
     abd_initialization=True,
+    spherical_average=False,
     abd_Q_tol=.5,
 ):
     r"""Looks for a Fock matrix subspace that approximately solves the
@@ -1072,6 +1082,9 @@ def find_subspace(
         abd_initialization : bool
             Toggles atomic block decomposition minimal basis initialization
             on. Optional, default is True.
+        spherical_average : bool
+            Whether ABD spherically averages the Fock matrix. Optional,
+            default is False.
         abd_Q_tol : float
             The atomic block decomposition charge tolerance, i.e. how much
             of the charge of the molecule the minimal basis is allowed to
@@ -1101,6 +1114,7 @@ def find_subspace(
             S,
             Q_tol=abd_Q_tol,
             link_shells=link_shells,
+            spherically_average_fock=spherical_average,
             verbose=verbose)
         mask_init_idx = np.where(mask)[0]
     else:
@@ -1339,33 +1353,6 @@ def mask_analysis(
             smask = mask_i
             extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
             
-            # if use_psi4:
-            #     mask = smask_to_mask(smask, fullbasis_mol.cart)
-                
-            #     subbasis_file = adbutils.subbasis_to_gaussian_file(fullbasis_mol, smask)
-            #     e_sub, wfn_sub = adbutils.psi4_manual_basis(
-            #         fullbasis_mol, subbasis_file, scf_obj_copy.init_guess,
-            #         dft=dft, xc=xc)
-            #     scf_energy = e_sub
-            #     # Get coefficient matrices
-            #     Ca = wfn_sub.Ca_subset('AO', 'ALL').to_array(copy=True)
-            #     if not is_restricted:
-            #         Cb = wfn_sub.Cb_subset('AO', 'ALL').to_array(copy=True)
-            #         C_sub = np.asarray([Ca, Cb])
-            #     else:
-            #         C_sub = Ca
-            #     # ovlp_sub = wfn_sub.S().to_array(copy=True)
-            #     # AOtoSO_sub = wfn_sub.aotoso().to_array(copy=True)[0]
-            #     # ovlp_sub = wfn_sub.S().to_array(copy=True)[0]
-            #     # ovlp_sub = AOtoSO_sub @ ovlp_sub @ AOtoSO_sub.T
-
-            #     # TODO: this ovlp comes from psi4 which orders the functions differently:
-            #     # therefore the mask (which uses pyscf ordering) is not correct!
-            #     Q_sqrd = get_q_sqrd(
-            #         C_full, C_sub,
-            #         ovlp[:,mask], nocc
-            #     )
-            # else:
             subbasis_mol = Mole(
                 atom = fullbasis_mol.atom, basis = extracted_basis,
                 charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
