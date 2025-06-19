@@ -620,9 +620,10 @@ def expand_mask(
         mask = smask_to_mask(smask)
     return mask, test_differences[array_index], test_sums[array_index][1], smask
 
-def get_atom_shell_label(mol, shl_idx, link_shells=False):
+
+def get_all_shell_labels(mol):
     count = np.zeros((mol.natm, 9), dtype=int)
-    label = []
+    labels = []
     for ib in range(mol.nbas):  # nbas = number of shells (basis fcts)
         ia = mol.bas_atom(ib)   # atom that given basis function sits on
         l = mol.bas_angular(ib) # angular momentum l of basis function
@@ -638,11 +639,25 @@ def get_atom_shell_label(mol, shl_idx, link_shells=False):
             shl_start = coreshl[l]+count[ia,l]+l+1
         count[ia,l] += nc
         for n in range(shl_start, shl_start+nc):
-            label.append((ia, symb, '%d%s' % (n, strl)))
+            labels.append((ia, symb, '%d%s' % (n, strl)))
+
+    return labels
+
+
+def get_atom_shell_label(mol, shl_idx, link_shells=False):
+    labels = get_all_shell_labels(mol)
 
     if link_shells:
-        return '%s %s' % label[shl_idx][1:]
-    return '%d %s %s' % label[shl_idx]
+        return '%s %s' % labels[shl_idx][1:]
+    return '%d %s %s' % labels[shl_idx]
+
+
+def print_shells(mol, smask):
+    labels = get_all_shell_labels(mol)
+    for i,sm in enumerate(smask):
+        if not sm[0]:
+            continue
+        print('Atom %d, symb: %s, shell: %s' % labels[i])
 
 
 def get_sub_scf_attributes(
@@ -733,7 +748,8 @@ def create_shell_separated_mol(mol, verbose=0):
 
 def print_data_header():
     print(
-            f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
+            f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}' +\
+             '  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
         )
 
 
@@ -894,18 +910,20 @@ def atomic_block_minimal_basis(
     # Loop through atomic blocks in the Fock matrix
     nfuncs_min_tot = 0
     for i,funcs_and_atom in enumerate(zip(func_per_atom, atoms)):
-        funcs, atom = funcs_and_atom
+        nfuncs, atom = funcs_and_atom
         print(f'{atom=}')
-        if by_shell:
-            smask_atom = list(filter(lambda x: x[3][0] == i, smask))
+        smask_atom = list(filter(lambda x: x[3][0] == i, smask))
         mask = np.zeros(mol.nao, dtype=bool)
         mask_atom = np.zeros(func_per_atom[i], dtype=bool)
         func_offset = np.sum(func_per_atom[:i])
-        mask[func_offset:func_offset+funcs] = True
+        mask[func_offset:func_offset+nfuncs] = True
         S_atom = mask_matrix(S, mask)
         F_atom = mask_matrix(F, mask)
+        # Number of functions in minimal basis of current atom
         nfunc_per_minimal_atom = int(np.ceil(
             (ELEMENTS.index(atom)-mol.atom_nelec_core(i)) / 2))
+        print(f'{nfunc_per_minimal_atom=}')
+        # Add to molecule minimal number of functions
         nfuncs_min_tot += nfunc_per_minimal_atom
         
         # TODO: fix the shell array (currently for whole mol, not just atomic block)
@@ -917,37 +935,46 @@ def atomic_block_minimal_basis(
 
         def number_of_states(energies, thresh=1e-3):
             nfuncs_include = nfunc_per_minimal_atom
-            while nfuncs_include < funcs \
-            and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
+            # Handle degeneracies
+            while nfuncs_include < nfuncs \
+              and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
+                print(f'{nfuncs_include=} {energies[nfuncs_include]=}')
                 nfuncs_include += 1
             return nfuncs_include
 
-        if verbose:
-            with np.printoptions(precision=2, suppress=True):
-                print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
 
         if restricted:
-            print(f'Energy of highest orbital {e_atom[number_of_states(e_atom)-1]*27.2114} eV')
-            occs = np.zeros(c_atom.shape[1])
-            occs[:number_of_states(e_atom)] = 2
-            Qlim = 2*number_of_states(e_atom)
             nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
+            print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
+            occs = np.zeros(c_atom.shape[1])
+            occs[:nocca] = 2
             P_atom = np.abs(
-                np.einsum('ik,kj,lj->il', c_atom, np.diag(occs), c_atom.conj())
+                c_atom @ np.diag(occs) @ c_atom.conj().T
             )
         else:
-            print(f'Energy of highest alpha orbital {e_atom[0, number_of_states(e_atom[0])-1]*27.2114} eV')
-            print(f'Energy of highest beta  orbital {e_atom[1, number_of_states(e_atom[1])-1]*27.2114} eV')
+            nocca, noccb = number_of_states(e_atom[0]), number_of_states(e_atom[1])
+            print(f'Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV')
+            print(f'Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV')
             occs = np.zeros((2, c_atom.shape[2]))
-            occs[0, :number_of_states(e_atom[0])] = 1
-            occs[1, :number_of_states(e_atom[1])] = 1
+            occs[0, :nocca] = 1
+            occs[1, :noccb] = 1
             P_atom = np.abs(
                 c_atom[0] @ np.diag(occs[0]) @ c_atom[0].conj().T +
                 c_atom[1] @ np.diag(occs[1]) @ c_atom[1].conj().T
                 )
-            Qlim = number_of_states(e_atom[0])+number_of_states(e_atom[1])
-            nocca, noccb = number_of_states(e_atom[0]), number_of_states(e_atom[1])
+        Qlim = nocca+noccb
         print(f'{Qlim=}')
+
+        if verbose:
+            with np.printoptions(precision=2, suppress=True):
+                if restricted:
+                    print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
+                    print(f'Occupied state energies [eV]: {e_atom[:nocca]*27.2114}')
+                else:
+                    print(f'Bound alpha state energies [eV]: {e_atom[0, e_atom[0,:]<0]*27.2114}')
+                    print(f'Bound beta  state energies [eV]: {e_atom[1, e_atom[1,:]<0]*27.2114}')
+                    print(f'Occupied alpha state energies [eV]: {e_atom[0, :nocca]*27.2114}')
+                    print(f'Occupied beta  state energies [eV]: {e_atom[1, :noccb]*27.2114}')
 
         atom_indices = set()
         Q = 0
@@ -988,7 +1015,7 @@ def atomic_block_minimal_basis(
                 P_atom[mask_atom, :] = 0
                 P_atom[:, mask_atom] = 0
 
-                # add indices to atom_indices
+                # add indices where mask is True to atom_indices
                 atom_indices.update(np.where(mask_atom)[0].tolist())
                 Q = get_q_sqrd(
                     c_atom.copy(), c_mask,
@@ -999,6 +1026,10 @@ def atomic_block_minimal_basis(
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
                 P_atom[Pat_i, Pat_j] = 0
                 P_atom[np.flip((Pat_i, Pat_j))] = 0
+                # fixme: update c_mask and Q
+                raise RuntimeError('not implemented')
+
+        # Mask
         atom_indices = list(atom_indices)
         minimal_basis_mask[func_offset + np.asarray(atom_indices)] = True
 
