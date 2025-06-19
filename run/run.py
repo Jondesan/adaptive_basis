@@ -380,10 +380,14 @@ def run_atomic_block_decomp_on_molecule_set(
         
     with open(output, 'w', buffering=1) as f:
         f.write('molname;init_guess;basis;nfuncs_abd;nfunc_full;qtol' + \
-                ';spin;charge;nfuncs_abs;e_minimal;e_abs\n')
+                ';spin;charge;nfuncs_abs;e_minimal;e_abs;e_fullscf\n')
         for molfilename, mol, uncmol, shells, init_guesses, basisname in mols:
             for init_guess in init_guesses:
-                if init_guess == 'scf':
+                if init_guess == 'scf' or \
+                   init_guess == 'minao' or \
+                   init_guess is None:
+                    continue
+                if len(mol._atom) != 2:
                     continue
                 xcfunc = 'PBE'
                 grid_level = 7
@@ -418,12 +422,12 @@ def run_atomic_block_decomp_on_molecule_set(
                     mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
                     mf.mo_occs = mf.get_occ(mf.mo_energy)
                     
+                    # Find minimal basis using atomic block decomposition
                     minimal_basis_mask = adb.atomic_block_minimal_basis(
                         mol, F, S, Q_tol=q_tol, by_shell=True,
                         get_mask_history=False, verbose=False,
                         spherically_average_fock=spherically_average_fock,
                     )
-
                     minimal_basis_smask = adb.init_smask(mol, mol.cart)
                     minimal_basis_smask = adb.mask_to_smask(minimal_basis_mask, minimal_basis_smask, mol.cart)
                     minimal_basis_mol = adb.create_subbasis_mol(mol, minimal_basis_smask)
@@ -432,6 +436,7 @@ def run_atomic_block_decomp_on_molecule_set(
                         mbmf.grids.level = grid_level
                         mbmf.xc = xcfunc
                         mbmf.grids.prune = None
+                    mbmf.init_guess = init_guess
                     mbmf.kernel()
                     e_minimal_basis = mbmf.e_tot
                     nfunc_minimal = np.sum(minimal_basis_mask)
@@ -448,15 +453,20 @@ def run_atomic_block_decomp_on_molecule_set(
                         sbmf.grids.level = grid_level
                         sbmf.xc = xcfunc
                         sbmf.grids.prune = None
+                    sbmf.init_guess = init_guess
                     sbmf.kernel()
                     e_subbasis = sbmf.e_tot
 
+                    mf.kernel()
+                    e_tot = mf.e_tot
+
+                    adb.print_shells(mol, minimal_basis_smask)
                     print(molfilename, init_guess, basisname, nfunc_minimal, \
-                          uncmol.nao_nr(), nfunc_abs, e_minimal_basis, e_subbasis)
+                          uncmol.nao_nr(), nfunc_abs, e_minimal_basis, e_subbasis, e_tot)
 
                     f.write(f'{molfilename.split(".")[0]};{init_guess};{basisname};')
                     f.write(f'{nfunc_minimal};{uncmol.nao_nr()};{q_tol};{mol.spin};{mol.charge};')
-                    f.write(f'{nfunc_abs};{e_minimal_basis:.12f};{e_subbasis:.12f}\n')
+                    f.write(f'{nfunc_abs};{e_minimal_basis:.12f};{e_subbasis:.12f};{e_tot}\n')
 
 
 def run_occupations(
