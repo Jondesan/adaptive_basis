@@ -984,6 +984,7 @@ def atomic_block_minimal_basis(
         # while len(atom_indices) < nfunc_per_minimal_atom:
         P_atom = np.round(P_atom, 12)
         while np.abs(Q - Qlim) > eps:
+            # Find largest element of density matrix
             P_atom_idx = np.unravel_index(np.argmax(P_atom, axis=None),P_atom.shape)
             # Check whether only 1 index tuple was found (no two equal 
             # elements in P_atom), otherwise set P_atom_idx to the first
