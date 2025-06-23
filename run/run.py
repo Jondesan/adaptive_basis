@@ -380,7 +380,8 @@ def run_atomic_block_decomp_on_molecule_set(
         
     with open(output, 'w', buffering=1) as f:
         f.write('molname;init_guess;basis;nfuncs_abd;nfunc_full;qtol' + \
-                ';spin;charge;nfuncs_abs;e_minimal;e_abs;e_fullscf\n')
+                ';spin;charge;nfuncs_abs;e_minimal;e_abs;e_fullscf' + \
+                ';abd_conv;abs_conv;full_conv\n')
         for molfilename, mol, uncmol, shells, init_guesses, basisname in mols:
             for init_guess in init_guesses:
                 if init_guess == 'scf' or \
@@ -438,6 +439,7 @@ def run_atomic_block_decomp_on_molecule_set(
                         mbmf.grids.prune = None
                     mbmf.init_guess = init_guess
                     mbmf.kernel()
+                    abd_conv = mbmf.converged
                     e_minimal_basis = mbmf.e_tot
                     nfunc_minimal = np.sum(minimal_basis_mask)
 
@@ -455,9 +457,11 @@ def run_atomic_block_decomp_on_molecule_set(
                         sbmf.grids.prune = None
                     sbmf.init_guess = init_guess
                     sbmf.kernel()
+                    abs_conv = sbmf.converged
                     e_subbasis = sbmf.e_tot
 
                     mf.kernel()
+                    full_conv = mf.converged
                     e_tot = mf.e_tot
 
                     adb.print_shells(mol, minimal_basis_smask)
@@ -466,7 +470,8 @@ def run_atomic_block_decomp_on_molecule_set(
 
                     f.write(f'{molfilename.split(".")[0]};{init_guess};{basisname};')
                     f.write(f'{nfunc_minimal};{uncmol.nao_nr()};{q_tol};{mol.spin};{mol.charge};')
-                    f.write(f'{nfunc_abs};{e_minimal_basis:.12f};{e_subbasis:.12f};{e_tot}\n')
+                    f.write(f'{nfunc_abs};{e_minimal_basis:.12f};{e_subbasis:.12f};{e_tot};')
+                    f.write(f'{abd_conv};{abs_conv};{full_conv}\n')
 
 
 def run_occupations(
