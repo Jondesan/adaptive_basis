@@ -43,19 +43,24 @@ def tk_debugger(*vars):
     print()
     print('######## TEEKKARIN DEBUGGER END #########################')
 
-def eigh(h, s):
+def eigh(
+        h: np.ndarray,
+        s: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
     """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
     """
-    # print(np.asarray(h).shape)
     if len(np.asarray(h).shape) == 3:
-        ea, ca = canonical_orth(h[0], s, get_idx=False)
-        eb, cb = canonical_orth(h[1], s, get_idx=False)
+        ea, ca = canonical_orth(h[0], s)
+        eb, cb = canonical_orth(h[1], s)
         return np.asarray([ea, eb]), np.asarray([ca, cb])
     else:
-        return canonical_orth(h, s, get_idx=False)
+        return canonical_orth(h, s)
 
 
-def canonical_orth(h, s, get_idx=False):
+def canonical_orth(
+        h: np.ndarray | tuple[np.ndarray, np.ndarray],
+        s: np.ndarray
+        ) -> tuple[np.ndarray, np.ndarray]:
     """Modified canonical orthogonalisation.
 
     Args:
@@ -71,20 +76,18 @@ def canonical_orth(h, s, get_idx=False):
         Sorted eigenvalues (ascending) and coefficients, if get_idx is
         True the indices that sort the eigenvalues are also returned
     """
-    # print('s shape before orth:', s.shape)
     x = canonical_orth_(s, 1e-8)
-    # print('s shape after orth:', x.shape)
     xhx = x.conj().T @ h @ x
     e, c = linalg.eigh(xhx)
     c = x @ c
     idx = np.argsort(e)
-    # e = np.sort(e)
-    if get_idx:
-        return e[idx], c[:,idx], idx
     return e[idx], c[:,idx]
 
 
-def extract_basis(smask, shellsep_mol):
+def extract_basis(
+        smask:          np.ndarray,
+        shellsep_mol:   gto.MoleBase
+    ) -> tuple[dict, dict | None]:
     """Extract a basis from given shell mask as python dictionary in
     pySCF format.
 
@@ -113,7 +116,6 @@ def extract_basis(smask, shellsep_mol):
         )
 
     asymb = list(shellsep_mol._basis.keys())
-
     basis = dict.fromkeys(asymb)
 
     duplicate_removed_smask = []
@@ -164,15 +166,14 @@ def extract_basis(smask, shellsep_mol):
 
 
 def basis_to_file_nwchem(
-    basis,
-    fn,
-    ecp_basis=None,
-    commentstring="",
-    bsname="ao basis",
-    cart=False,
-    print_noprint="print",
-    additional_labels="",
-):
+    basis:              dict,
+    fn:                 str,
+    ecp_basis:          dict | None = None,
+    commentstring:      str = "",
+    bsname:             str = "ao basis",
+    cart:               bool = False,
+    print_noprint:      str = "print",
+    additional_labels:  str = "" ) -> None:
     """Converts the basis to NWChem format and writes it into a file.
 
     Args:
@@ -214,7 +215,9 @@ def basis_to_file_nwchem(
     return
 
 
-def get_uncontracted_basis(mol, fn=None):
+def get_uncontracted_basis(
+        mol:    gto.MoleBase,
+        fn:     str | None = None) -> str:
     """Unravel the contracted basis of mol.
 
     Args:
@@ -264,7 +267,7 @@ def get_uncontracted_basis(mol, fn=None):
     return basis
 
 
-def get_basis_dict(basis: str):
+def get_basis_dict(basis: str) -> dict:
     """Convert a basis string into a dictionary to pass
     to pyscf.gto.basis.parse
     """
@@ -275,7 +278,7 @@ def get_basis_dict(basis: str):
     return dc
 
 
-def get_shells(mol):
+def get_shells(mol: gto.MoleBase) -> np.ndarray:
     """Get the shell structure of mol object.
 
     Args:
@@ -304,7 +307,10 @@ def get_shells(mol):
     return shells
 
 
-def maskidx_to_smaskidx(mask, smask, cart=False):
+def maskidx_to_smaskidx(
+        mask:   np.ndarray,
+        smask:  np.ndarray,
+        cart:   bool = False) -> list:
     """Create mapping between mask and smask"""
     mapping = [0] * len(mask)
     counter = 0
@@ -316,7 +322,9 @@ def maskidx_to_smaskidx(mask, smask, cart=False):
     return mapping
 
 
-def init_smask(mol, cart=False):
+def init_smask(
+        mol:    gto.MoleBase,
+        cart:   bool = False) -> np.ndarray:
     """Initialize the shell mask array. smask will be a list of lists,
     with length equal to the number of uncontracted shells, and each
     element is a two element list, first is bool that specifies the mask
@@ -355,7 +363,9 @@ def init_smask(mol, cart=False):
     return np.array(smask, dtype=object)
 
 
-def smask_to_mask(smask, cart=False):
+def smask_to_mask(
+        smask:  np.ndarray,
+        cart:   bool = False) -> np.ndarray:
     """Convert current shell mask into function mask."""
     funcs_per_shell = [
         ((s[2] + 1) * (s[2] + 2) // 2 if cart else 2 * s[2] + 1) for s in smask
@@ -369,7 +379,10 @@ def smask_to_mask(smask, cart=False):
     return np.array(mask, dtype=bool)
 
 
-def mask_to_smask(mask, smask, cart=False):
+def mask_to_smask(
+        mask:   np.ndarray,
+        smask:  np.ndarray,
+        cart:   bool = False) -> np.ndarray:
     """Flip shells of smask to True that have 1 or more functions set to
     True in mask.
     """
@@ -381,14 +394,14 @@ def mask_to_smask(mask, smask, cart=False):
 
 
 def get_iteration_criteria_value(
-    variant,
-    epsilon_i=None,
-    nocc=None,
-    sub_hcore=None,
-    Csub=None,
-    Cfull=None,
-    ovlp=None
-    ):
+    variant:    str,
+    epsilon_i:  np.ndarray | None   = None,
+    nocc:       tuple | None        = None,
+    sub_hcore:  np.ndarray | None   = None,
+    Csub:       np.ndarray | None   = None,
+    Cfull:      np.ndarray | None   = None,
+    ovlp:       np.ndarray | None   = None
+    ) -> float:
     """Calculates the value of the chosen variants criteria.
 
     Args:
@@ -446,7 +459,7 @@ def get_iteration_criteria_value(
             return get_q_sqrd(Cfull, Csub, ovlp, nocc)
 
 
-def linked_shell_idx(smask):
+def linked_shell_idx(smask: np.ndarray) -> np.ndarray:
     """ Return smask indices that correspond to duplicate shells, i.e.
     if molecule has more than one of same atom type, the shells of that
     atom will be duplicated.
@@ -472,20 +485,20 @@ def linked_shell_idx(smask):
                 if ele == "".join([str(s) for s in sm[3][1:]])
             ]
             shl_indices.append(indices)
-    return shl_indices
+    return np.asarray(shl_indices)
 
 def expand_mask(
-    F,
-    S,
-    nocc,
-    mask,
-    smask=None,
-    variant='enocc',
-    hcore=None,
-    Cfull=None,
-    link_shells=True,
-    nfunc_normalisation=True,
-):
+    F:                      np.ndarray,
+    S:                      np.ndarray,
+    nocc:                   tuple,
+    mask:                   np.ndarray,
+    smask:                  np.ndarray | None   = None,
+    variant:                str                 = 'enocc',
+    hcore:                  np.ndarray | None   = None,
+    Cfull:                  np.ndarray | None   = None,
+    link_shells:            bool                = True,
+    nfunc_normalisation:    bool                = True,
+    ) -> tuple[np.ndarray, float, float, np.ndarray | None]:
     r"""Expands the current mask by either one function or one shell
     based on smask.
 
@@ -621,7 +634,7 @@ def expand_mask(
     return mask, test_differences[array_index], test_sums[array_index][1], smask
 
 
-def get_all_shell_labels(mol):
+def get_all_shell_labels(mol: gto.MoleBase) -> list[str]:
     count = np.zeros((mol.natm, 9), dtype=int)
     labels = []
     for ib in range(mol.nbas):  # nbas = number of shells (basis fcts)
@@ -644,7 +657,11 @@ def get_all_shell_labels(mol):
     return labels
 
 
-def get_atom_shell_label(mol, shl_idx, link_shells=False):
+def get_atom_shell_label(
+        mol: gto.MoleBase,
+        shl_idx: int,
+        link_shells: bool = False
+    ) -> str:
     labels = get_all_shell_labels(mol)
 
     if link_shells:
@@ -652,7 +669,7 @@ def get_atom_shell_label(mol, shl_idx, link_shells=False):
     return '%d %s %s' % labels[shl_idx]
 
 
-def print_shells(mol, smask):
+def print_shells(mol: gto.MoleBase, smask: np.ndarray) -> None:
     labels = get_all_shell_labels(mol)
     for i,sm in enumerate(smask):
         if not sm[0]:
@@ -661,13 +678,13 @@ def print_shells(mol, smask):
 
 
 def get_sub_scf_attributes(
-    mol,
-    fock,
-    overlap,
-    dft=False,
-    xc='b3lyp',
-    grid_level=7
-    ):
+    mol:            gto.MoleBase,
+    fock:           np.ndarray,
+    overlap:        np.ndarray,
+    dft:            bool            = False,
+    xc:             str             = 'b3lyp',
+    grid_level:     int             = 7,
+    ) -> tuple[float, float, np.ndarray]:
     """Calculates converged attributes for the system.
 
     Args:
@@ -721,9 +738,11 @@ def get_sub_scf_attributes(
     return scf_energy, scf_orbital_energy, mf.mo_coeff
 
 
-def create_subbasis_mol(mol, smask):
+def create_subbasis_mol(
+        mol:        gto.MoleBase,
+        smask:      np.ndarray) -> gto.MoleBase:
     extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(mol))
-    subbasis_mol = Mole(
+    subbasis_mol = gto.Mole(
         atom = mol.atom, basis = extracted_basis,
         charge = mol.charge, spin = mol.spin,
         verbose = mol.verbose, unit = mol.unit,
@@ -734,7 +753,9 @@ def create_subbasis_mol(mol, smask):
     return subbasis_mol
 
 
-def create_shell_separated_mol(mol, verbose=0):
+def create_shell_separated_mol(
+        mol:        gto.MoleBase,
+        verbose:    int = 0) -> gto.MoleBase:
     """Creates a copy of mol with shells separated."""
     shell_sep_basis = get_uncontracted_basis(mol)
     cmol = gto.M(
@@ -746,7 +767,7 @@ def create_shell_separated_mol(mol, verbose=0):
     return cmol
 
 
-def print_data_header():
+def print_data_header() -> None:
     print(
             f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}' +\
              '  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
@@ -754,14 +775,17 @@ def print_data_header():
 
 
 def print_data(
-    mask,
-    criteria_value,
-    diff,
-    ao_or_shell_label,
-    E_scf="-",
-    Qsqrd="-",
-    print_header=False,
-):
+    mask:               np.ndarray,
+    criteria_value:     float,
+    diff:               float,
+    ao_or_shell_label:  str,
+    E_scf:              float | str = "-",
+    Qsqrd:              float | str = "-",
+    print_header:       bool        = False ) -> None:
+    """Data printout function
+    
+    """
+
     if print_header:
         print_data_header()
 
@@ -778,7 +802,11 @@ def print_data(
     print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "18.12f"}}')
 
 
-def get_q_sqrd(Cfull, Csub, ovlp, nocc):
+def get_q_sqrd(
+        Cfull:      np.ndarray,
+        Csub:       np.ndarray,
+        ovlp:       np.ndarray,
+        nocc:       np.ndarray  ) -> float:
     """Calculates the square of the projection Q"""
     RHF = (len(Cfull.shape) == 2)
     if RHF:
@@ -792,7 +820,11 @@ def get_q_sqrd(Cfull, Csub, ovlp, nocc):
         return (np.sum(np.sum(Q[0]**2)) + np.sum(np.sum(Q[1]**2)))
 
 
-def set_linked_shells(smask, val):
+def set_linked_shells(
+        smask:  np.ndarray,
+        val:    bool        ) -> np.ndarray:
+    """Set smask to 'val' at linked shell positions.
+    """
     copysmask = copy.deepcopy(smask)
     selected_shells = np.argwhere([sm[0] for sm in copysmask])
     all_shells = np.array([''.join(map(str, sm[3][1:])) for sm in copysmask])
@@ -805,7 +837,10 @@ def set_linked_shells(smask, val):
     return copysmask
 
 
-def mask_matrix(mat, mask, is_restricted=True):
+def mask_matrix(
+        mat:                np.ndarray,
+        mask:               np.ndarray,
+        is_restricted:      bool        = True ) -> np.ndarray:
     """Return masked matrix
 
     Args:
@@ -828,7 +863,7 @@ def mask_matrix(mat, mask, is_restricted=True):
     return mat[mask, :][:, mask] if is_restricted else mat[:, mask, :][:, :, mask]
 
 
-def basis_functions_per_atom(mol):
+def basis_functions_per_atom(mol: gto.MoleBase) -> np.ndarray:
     basis_struct = mol._bas
     atoms = mol._atom
     nat = len(atoms)
@@ -840,7 +875,7 @@ def basis_functions_per_atom(mol):
     return func_per_atom
 
 
-def spherical_average(mat, ml):
+def spherical_average(mat: np.ndarray, ml: np.ndarray) -> np.ndarray:
     """Calculate the spherical average of a matrix.
 
     Args:
@@ -860,7 +895,7 @@ def spherical_average(mat, ml):
     return mat_out
 
 
-def sph_avg(mat, ml):
+def sph_avg(mat: np.ndarray, ml: np.ndarray) -> np.ndarray:
     mat_copy = mat.copy()
     offset = 0
     for nfunc in ml:
@@ -881,16 +916,16 @@ def sph_avg(mat, ml):
 
 
 def atomic_block_minimal_basis(
-    mol,
-    F,
-    S,
-    Q_tol=1,
-    by_shell=True,
-    get_mask_history=True,
-    link_shells=False,
-    verbose=True,
-    spherically_average_fock=True,
-):
+    mol:                        gto.MoleBase,
+    F:                          np.ndarray,
+    S:                          np.ndarray,
+    Q_tol:                      float           = 1.0,
+    by_shell:                   bool            = True,
+    get_mask_history:           bool            = True,
+    link_shells:                bool            = False,
+    verbose:                    bool            = True,
+    spherically_average_fock:   bool            = True,
+    ) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
     """Create minimal basis from atomic block decomposition.
     """
     func_per_atom = basis_functions_per_atom(mol)
@@ -999,7 +1034,7 @@ def atomic_block_minimal_basis(
                 mask_atom[Pat_j] = True
                 smask_atom = mask_to_smask(mask_atom, smask_atom, mol.cart)
                 mask_atom = smask_to_mask(smask_atom, mol.cart)
-                e_mask, c_mask = eigh(
+                _, c_mask = eigh(
                     mask_matrix(F_ave.copy(), mask_atom),
                     mask_matrix(S_atom.copy(), mask_atom)
                     )
@@ -1040,22 +1075,21 @@ def atomic_block_minimal_basis(
     return minimal_basis_mask
 
 def find_subspace(
-    F,
-    S,
-    mol,
-    scf_obj,
-    conv_tol=1e-2,
-    verbose=True,
-    get_smask=False,
-    variant='enocc',
-    link_shells=True,
-    nfunc_normalisation=True,
-    return_mask_history=False,
-    mask_cutoff=None,
-    abd_initialization=True,
-    spherical_average=False,
-    abd_Q_tol=.5,
-):
+    F:                      np.ndarray,
+    S:                      np.ndarray,
+    mol:                    gto.MoleBase,
+    scf_obj:                scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
+    conv_tol:               float           = 1e-2,
+    verbose:                bool            = True,
+    get_smask:              bool            = False,
+    variant:                str             = 'enocc',
+    link_shells:            bool            = True,
+    nfunc_normalisation:    bool            = True,
+    return_mask_history:    bool            = False,
+    abd_initialization:     bool            = True,
+    spherical_average:      bool            = False,
+    abd_Q_tol:              float           = .5,
+    ) -> np.ndarray:
     r"""Looks for a Fock matrix subspace that approximately solves the
     Roothaan equation FC=SCE below a convergence of conv_tol.
 
@@ -1225,12 +1259,8 @@ def find_subspace(
             basis_initialized = np.sum(mask) >= np.max(nocc)
             continue
         
-        if  mask_cutoff is None         and \
-            abs(difference) < conv_tol  or \
+        if  abs(difference) < conv_tol  or \
             sum(mask) == len(mask):
-            break
-        elif mask_cutoff is not None    and \
-             np.count_nonzero(mask)/len(mask) >= mask_cutoff:
             break
 
     if get_smask:
@@ -1243,18 +1273,22 @@ def find_subspace(
 
 
 def mask_analysis(
-    mask_history, mol, scf_obj,
-    fock, ovlp, verbose=True,
-    sym_occ_fname='occupations.dat',
-    molfname=None,
-    basis='def2-tzvp',
-    link_shells=True,
-    dft=False,
-    xc='b3lyp',
-    grid_level=7,
-    use_psi4=False,
-    C_full=None
-    ):
+    mask_history:   np.ndarray,
+    mol:            gto.MoleBase,
+    scf_obj:        scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
+    fock:           np.ndarray,
+    ovlp:           np.ndarray,
+    verbose:        bool                = True,
+    sym_occ_fname:  str                 = 'occupations.dat',
+    molfname:       str | None          = None,
+    basis:          str                 = 'def2-tzvp',
+    link_shells:    bool                = True,
+    dft:            bool                = False,
+    xc:             str                 = 'b3lyp',
+    grid_level:     int                 = 7,
+    use_psi4:       bool                = False,
+    C_full:         np.ndarray | None   = None
+    ) -> list:
     """Run mask analysis.
 
     Args:
