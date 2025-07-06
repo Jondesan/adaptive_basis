@@ -22,7 +22,6 @@ import re
 
 VARIANTS = [
     'enocc', # Energy sum of occupied orbitals
-    #'ecore', # Energy sum of orbitals and core H
     'elden', # Electron density
 ]
 NFUNCS = {
@@ -59,8 +58,7 @@ def eigh(
 
 def canonical_orth(
         h: np.ndarray | tuple[np.ndarray, np.ndarray],
-        s: np.ndarray
-        ) -> tuple[np.ndarray, np.ndarray]:
+        s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Modified canonical orthogonalisation.
 
     Args:
@@ -169,11 +167,11 @@ def basis_to_file_nwchem(
     basis:              dict,
     fn:                 str,
     ecp_basis:          dict | None = None,
-    commentstring:      str = "",
-    bsname:             str = "ao basis",
-    cart:               bool = False,
-    print_noprint:      str = "print",
-    additional_labels:  str = "" ) -> None:
+    commentstring:      str         = "",
+    bsname:             str         = "ao basis",
+    cart:               bool        = False,
+    print_noprint:      str         = "print",
+    additional_labels:  str         = "" ) -> None:
     """Converts the basis to NWChem format and writes it into a file.
 
     Args:
@@ -217,7 +215,7 @@ def basis_to_file_nwchem(
 
 def get_uncontracted_basis(
         mol:    gto.MoleBase,
-        fn:     str | None = None) -> str:
+        fn:     str | None    = None) -> str:
     """Unravel the contracted basis of mol.
 
     Args:
@@ -310,7 +308,7 @@ def get_shells(mol: gto.MoleBase) -> np.ndarray:
 def maskidx_to_smaskidx(
         mask:   np.ndarray,
         smask:  np.ndarray,
-        cart:   bool = False) -> list:
+        cart:   bool        = False) -> list:
     """Create mapping between mask and smask"""
     mapping = [0] * len(mask)
     counter = 0
@@ -324,7 +322,7 @@ def maskidx_to_smaskidx(
 
 def init_smask(
         mol:    gto.MoleBase,
-        cart:   bool = False) -> np.ndarray:
+        cart:   bool          = False) -> np.ndarray:
     """Initialize the shell mask array. smask will be a list of lists,
     with length equal to the number of uncontracted shells, and each
     element is a two element list, first is bool that specifies the mask
@@ -365,7 +363,7 @@ def init_smask(
 
 def smask_to_mask(
         smask:  np.ndarray,
-        cart:   bool = False) -> np.ndarray:
+        cart:   bool        = False) -> np.ndarray:
     """Convert current shell mask into function mask."""
     funcs_per_shell = [
         ((s[2] + 1) * (s[2] + 2) // 2 if cart else 2 * s[2] + 1) for s in smask
@@ -382,7 +380,7 @@ def smask_to_mask(
 def mask_to_smask(
         mask:   np.ndarray,
         smask:  np.ndarray,
-        cart:   bool = False) -> np.ndarray:
+        cart:   bool        = False) -> np.ndarray:
     """Flip shells of smask to True that have 1 or more functions set to
     True in mask.
     """
@@ -396,7 +394,7 @@ def mask_to_smask(
 def get_iteration_criteria_value(
     variant:    str,
     epsilon_i:  np.ndarray | None   = None,
-    nocc:       tuple | None        = None,
+    nocc:       tuple      | None   = None,
     sub_hcore:  np.ndarray | None   = None,
     Csub:       np.ndarray | None   = None,
     Cfull:      np.ndarray | None   = None,
@@ -413,15 +411,6 @@ def get_iteration_criteria_value(
             energy eigenvalues
         nocc : tuple
             number of occupations
-        ecore: 
-        evals : ndarray
-            energy eigenvalues
-        nocc : tuple
-            number of occupations
-        sub_hcore : 2D array
-            subbasis core hamiltonian hcore,
-        Csub : ndarray
-            subbasis coefficient matrix Csub
         elden:
         Cfull : ndarray
             full basis coeff matrix
@@ -442,19 +431,15 @@ def get_iteration_criteria_value(
             'The variant you are trying to use was not recognised!')
     match variant:
         case 'enocc':
+            if epsilon_i is None or nocc is None:
+                raise ValueError("Energies 'epsilon_i' or occupations 'nocc' not provided.")
             RHF = (len(np.asarray(epsilon_i).shape) == 1)
             if RHF:
                 criteria = np.sum(epsilon_i[:nocc[0]])
             else:
                 criteria  = np.sum(epsilon_i[0,:nocc[0]])
                 criteria += np.sum(epsilon_i[1,:nocc[1]]) 
-            return criteria
-        case 'ecore':
-            mocc = Csub[:,:nocc]
-            P = mocc @ mocc.conj().T
-            return np.sum(
-                P[:nocc,:nocc]
-                @ (sub_hcore + np.diag(epsilon_i))[:nocc,:nocc] )
+            return float(criteria)
         case 'elden':
             return get_q_sqrd(Cfull, Csub, ovlp, nocc)
 
@@ -740,7 +725,7 @@ def get_sub_scf_attributes(
 
 def create_subbasis_mol(
         mol:        gto.MoleBase,
-        smask:      np.ndarray) -> gto.MoleBase:
+        smask:      np.ndarray    ) -> gto.MoleBase:
     extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(mol))
     subbasis_mol = gto.Mole(
         atom = mol.atom, basis = extracted_basis,
@@ -755,7 +740,7 @@ def create_subbasis_mol(
 
 def create_shell_separated_mol(
         mol:        gto.MoleBase,
-        verbose:    int = 0) -> gto.MoleBase:
+        verbose:    int           = 0) -> gto.MoleBase:
     """Creates a copy of mol with shells separated."""
     shell_sep_basis = get_uncontracted_basis(mol)
     cmol = gto.M(
@@ -803,10 +788,10 @@ def print_data(
 
 
 def get_q_sqrd(
-        Cfull:      np.ndarray,
-        Csub:       np.ndarray,
-        ovlp:       np.ndarray,
-        nocc:       np.ndarray  ) -> float:
+        Cfull: np.ndarray,
+        Csub:  np.ndarray,
+        ovlp:  np.ndarray,
+        nocc:  np.ndarray  ) -> float:
     """Calculates the square of the projection Q"""
     RHF = (len(Cfull.shape) == 2)
     if RHF:
