@@ -134,7 +134,12 @@ def read_data(path: str):
 
     return dat
 
-def process_files(datadir, handle_decontraction, bsets):
+def process_files(
+        datadir,
+        handle_decontraction,
+        bsets,
+        verbose=False,
+        ):
     files = os.listdir(datadir)
     # list of all files corresponding to chosen molecule
     files_to_process = list(filter(lambda f: mol == f.split('.')[0], files))
@@ -152,7 +157,10 @@ def process_files(datadir, handle_decontraction, bsets):
         # If basis sets are provided filter files to be processed to only
         # go through selected basis set results
         dashremoved_files = list(filter(lambda f: any(bs in f for bs in bsets), dashremoved_files))
-    bsets = list(set(map(lambda fp: fp.split('.')[1], dashremoved_files)))
+    
+    bsets = list(set(map(
+        lambda fp: fp.split('.')[1], dashremoved_files
+        )))
     # Filter out uncontracted files if user requests not to draw them
     if not handle_decontraction:
         dashremoved_files = list(filter(lambda f: 'unc' not in f, dashremoved_files))
@@ -161,12 +169,13 @@ def process_files(datadir, handle_decontraction, bsets):
     dat = [read_data(datadir + '/' + f) for f in files_to_process]
     dat.sort(key = operator.attrgetter('basis_set', 'init_guess'))
     
-    for d in dat:
-        print(d.name, d.basis_set, d.init_guess, end=' ')
-        if d.init_guess == 'sap':
-            print(d.sapbasisname)
-        else:
-            print()
+    if verbose:
+        for d in dat:
+            print(d.name, d.basis_set, d.init_guess, end=' ')
+            if d.init_guess == 'sap':
+                print(d.sapbasisname)
+            else:
+                print()
 
     return dat
 
@@ -232,8 +241,6 @@ if __name__ == "__main__":
         bsets=bsets
         )
 
-    # print(files_to_process)
-
 
     if figset == 'default':
         # Draw convergence, projection and accuracy figures.
@@ -250,7 +257,10 @@ if __name__ == "__main__":
         for bset in list(filter(lambda bs: 'unc' not in bs, bsets)):
             # make 4 figures for uncontracted, contracted, projection and accuracy panels,
             # or 3 for contracted, projection and accuracy panels
-            numpanels = (any('unc' in bs for bs in bsets)) + 3
+            #numpanels = (any('unc' in bs for bs in bsets)) + 3
+            numpanels = 4 if handle_decontraction else 3
+            var = list('unc' in bs for bs in bsets)
+            print(f'{numpanels=} {var=}')
             figs.extend([
                 plt.figure(panelidx + i, figsize=(10, 8), tight_layout=True)
                 for i in range(numpanels)
@@ -285,18 +295,12 @@ if __name__ == "__main__":
                     label=( f'{df.init_guess}' + (f', basis: {df.sapbasisname}' if df.init_guess == 'sap' else '') ),
                     c=colors[j], ls=ls[ j % (numpanels-1) ], marker='o', lw=lw
                     )
-                # Get index where convergence criteria is met and store
-                # conv_idx = np.argwhere(y <= conv_tol)#[0]
-                # if conv_idx.size == 0:
-                #     conv_idx = -1
-                # else:
-                #     conv_idx = conv_idx[0]
-                # convergences.append(x.values[conv_idx])#.values[0])
 
                 # Projection panels
                 axs[panelidx + 1].semilogy(
                         df.sbsdat["nfunc"] / nfunc,
                     1 - df.sbsdat["Qsqrd"] / df.nocc,
+                    # df.sbsdat["Qsqrd"],
                     label=f"{df.basis_set}, nfunc: {df.nfunc}" +
                     # (f', init_guess: {df.init_guess}' if df.init_guess != 'SCF' else f', {df.init_guess}'),
                     f', {df.init_guess}' + ('' if df.init_guess != 'sap' else f' {df.sapbasisname}'),
