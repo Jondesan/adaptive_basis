@@ -11,7 +11,7 @@ from pyscf.data.elements import _std_symbol, ELEMENTS
 from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
 from pyscf.scf import *
-from pyscf.scf.addons import canonical_orth_
+from pyscf.scf.addons import canonical_orth_, project_dm_nr2nr
 from pyscf import lib, gto, scf
 from warnings import warn
 from operator import itemgetter
@@ -41,6 +41,24 @@ def tk_debugger(*vars):
         print(var, end=' ')
     print()
     print('######## TEEKKARIN DEBUGGER END #########################')
+
+
+def dual_basis_energy_correction(
+    scf_obj: scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
+    P_full_projected: np.ndarray
+    ) -> float:
+                
+    correction = 0.0
+    F_full = scf_obj.get_fock(dm=P_full_projected)
+    E_new, C_new = eigh(F_full, scf_obj.get_ovlp())
+    P_new = scf_obj.make_rdm1(
+        mo_coeff=C_new,
+        mo_occ=scf_obj.get_occ(mo_energy=E_new, mo_coeff=C_new))
+    dP = P_new - P_full_projected
+    correction = np.trace(dP @ F_full)
+
+    return correction
+
 
 def eigh(
         h: np.ndarray,
@@ -1258,21 +1276,22 @@ def find_subspace(
 
 
 def mask_analysis(
-    mask_history:   np.ndarray,
-    mol:            gto.MoleBase,
-    scf_obj:        scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
-    fock:           np.ndarray,
-    ovlp:           np.ndarray,
-    verbose:        bool                = True,
-    sym_occ_fname:  str                 = 'occupations.dat',
-    molfname:       str | None          = None,
-    basis:          str                 = 'def2-tzvp',
-    link_shells:    bool                = True,
-    dft:            bool                = False,
-    xc:             str                 = 'b3lyp',
-    grid_level:     int                 = 7,
-    use_psi4:       bool                = False,
-    C_full:         np.ndarray | None   = None
+    mask_history:           np.ndarray,
+    mol:                    gto.MoleBase,
+    scf_obj:                scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
+    fock:                   np.ndarray,
+    ovlp:                   np.ndarray,
+    verbose:                bool                = True,
+    sym_occ_fname:          str                 = 'occupations.dat',
+    molfname:               str | None          = None,
+    basis:                  str                 = 'def2-tzvp',
+    link_shells:            bool                = True,
+    dft:                    bool                = False,
+    xc:                     str                 = 'b3lyp',
+    grid_level:             int                 = 7,
+    use_psi4:               bool                = False,
+    C_full:                 np.ndarray | None   = None,
+    calculate_correction:   bool                = False,
     ) -> list:
     """Run mask analysis.
 
@@ -1311,7 +1330,11 @@ def mask_analysis(
         use_psi4 : bool
             If True, psi4 will be used for SCF computation instead of PySCF.
             Optional, default is False.
-
+        C_full : np.ndarray | None
+            Full basis coefficient matrix, used for projection calculations.
+        calculate_correction : bool
+            Whether to calculate the dual basis correction of Liang, Steele,
+            Head-Gordon et al. for every subbasis.
     Return:
         dataframe : array
             A python array with number of functions,
@@ -1463,6 +1486,20 @@ def mask_analysis(
                     ovlp[:,mask], nocc
                 )
             
+            # Calculate dual basis correction as per Liang, Steele,
+            # Head-Gordon et al.
+            if calculate_correction:
+                P_sub = submf.make_rdm1()
+                P_full_projected = project_dm_nr2nr(
+                    subbasis_mol,
+                    P_sub,
+                    fullbasis_mol)
+                dE = dual_basis_energy_correction(
+                    fullbasis_mol.HF(),
+                    P_full_projected,
+                )
+
+
             if not submf.converged:
                 print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
         else:
