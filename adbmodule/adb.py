@@ -1423,6 +1423,7 @@ def mask_analysis(
         irrep_symb = True        
 
     for mask_i, current_val, difference, *init in mask_history:
+        dE = 0.0
         if is_smask:
             smask = mask_i
             extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
@@ -1534,6 +1535,7 @@ def mask_analysis(
                 scf_orbital_energy,
                 Q_sqrd,
                 copy.deepcopy(smask if is_smask else mask),
+                dE,
             ])
         last_mask = copy.deepcopy(mask)
         if is_smask:
