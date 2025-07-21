@@ -488,7 +488,7 @@ def linked_shell_idx(smask: np.ndarray) -> np.ndarray:
                 if ele == "".join([str(s) for s in sm[3][1:]])
             ]
             shl_indices.append(indices)
-    return np.asarray(shl_indices)
+    return shl_indices
 
 def expand_mask(
     F:                      np.ndarray,
