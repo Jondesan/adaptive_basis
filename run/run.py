@@ -169,6 +169,8 @@ def run_abs(
     """
     datacols = ["nfunc", "cursum", "diff", "E_scf", "E_orb", "Qsqrd", "smask"]
     calculate_DB_correction = True
+    if calculate_DB_correction:
+        datacols.append('dE')
 
     for molfilename, mol, shellsep_mol, shells, init_guess, basisname in mol_list:
         # Open the output file
@@ -352,8 +354,6 @@ def run_abs(
 
                     # if variant == 'enocc':
                     #     df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
-                    if calculate_DB_correction:
-                        datacols.append('dE')
                     df_sbys = pd.DataFrame(data_sbys, columns=datacols)
 
                     f.write("{:<15s} {:<30s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
