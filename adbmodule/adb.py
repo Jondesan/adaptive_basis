@@ -50,7 +50,7 @@ def dual_basis_energy_correction(
                 
     correction = 0.0
     F_full = scf_obj.get_fock(dm=P_full_projected)
-    E_new, C_new = eigh(F_full, scf_obj.get_ovlp())
+    E_new, C_new = hf.eig(F_full, scf_obj.get_ovlp())
     P_new = scf_obj.make_rdm1(
         mo_coeff=C_new,
         mo_occ=scf_obj.get_occ(mo_energy=E_new, mo_coeff=C_new))
@@ -773,7 +773,7 @@ def create_shell_separated_mol(
 def print_data_header() -> None:
     print(
             f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}' +\
-             '  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
+            f'  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
         )
 
 
@@ -957,10 +957,12 @@ def atomic_block_minimal_basis(
         mask[func_offset:func_offset+nfuncs] = True
         S_atom = mask_matrix(S, mask)
         F_atom = mask_matrix(F, mask)
-        # Number of functions in minimal basis of current atom
+        # Number of functions in minimal basis of current atom,
+        # not counting ECP electrons
         nfunc_per_minimal_atom = int(np.ceil(
             (ELEMENTS.index(atom)-mol.atom_nelec_core(i)) / 2))
         print(f'{nfunc_per_minimal_atom=}')
+        print(f'{nfuncs=}')
         # Add to molecule minimal number of functions
         nfuncs_min_tot += nfunc_per_minimal_atom
         
@@ -972,17 +974,19 @@ def atomic_block_minimal_basis(
         e_atom, c_atom = eigh(F_ave, S_atom.copy())
 
         def number_of_states(energies, thresh=1e-3):
+            print(f'{energies=}')
             nfuncs_include = nfunc_per_minimal_atom
             # Handle degeneracies
             while nfuncs_include < nfuncs \
               and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
-                print(f'{nfuncs_include=} {energies[nfuncs_include]=}')
+                # print(f'{nfuncs_include=} {energies[nfuncs_include]=}')
                 nfuncs_include += 1
             return nfuncs_include
 
 
         if restricted:
             nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
+            print(f'{nocca=}, {noccb=}')
             print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
             occs = np.zeros(c_atom.shape[1])
             occs[:nocca] = 2
@@ -1463,7 +1467,8 @@ def mask_analysis(
                             raise RuntimeError(f'irrep {key} not found in subbasis')
                         submf.irrep_nelec[key] = irrep_nelec[key]
             else:
-                print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
+                # print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
+                pass
             submf.kernel(dump_chk=False)
             scf_energy = submf.e_tot
  
