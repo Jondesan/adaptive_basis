@@ -11,6 +11,7 @@ from pyscf.data.elements import _std_symbol, ELEMENTS
 from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
 from pyscf.scf import *
+from pyscf.scf.hf import eig
 from pyscf.scf.addons import canonical_orth_, project_dm_nr2nr
 from pyscf import lib, gto, scf
 from warnings import warn
@@ -94,7 +95,7 @@ def canonical_orth(
     """
     x = canonical_orth_(s, 1e-8)
     xhx = x.conj().T @ h @ x
-    e, c = linalg.eigh(xhx)
+    e, c = linalg.eig(xhx)
     c = x @ c
     idx = np.argsort(e)
     return e[idx], c[:,idx]
@@ -556,10 +557,10 @@ def expand_mask(
     RHF = (len(F.shape) == 2)
     maskedF = mask_matrix(F, mask, RHF)
     maskedS = mask_matrix(S, mask)
-    evals, coeffs = eigh(maskedF, maskedS)
+    evals, coeffs = eig(maskedF, maskedS)
     last_sum = 0.0
     if Cfull is None and variant == 'elden':
-        _, Cfull = eigh(F, S)
+        _, Cfull = eig(F, S)
     last_sum = get_iteration_criteria_value(
         variant, epsilon_i=evals, nocc=nocc,
         sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
@@ -575,7 +576,7 @@ def expand_mask(
             test_mask[i] = True
             maskedF = mask_matrix(F, test_mask, RHF)
             maskedS = mask_matrix(S, test_mask)
-            evals, coeffs = eigh(maskedF, maskedS)
+            evals, coeffs = eig(maskedF, maskedS)
 
             test_sums.append(
                 (i,
@@ -605,7 +606,7 @@ def expand_mask(
 
             maskedF = mask_matrix(F, test_mask, RHF)
             maskedS = mask_matrix(S, test_mask)
-            evals, coeffs = eigh(maskedF, maskedS)
+            evals, coeffs = eig(maskedF, maskedS)
             
             func_keys = [shell[3] for shell in submask[:,3]]
             nfuncs = np.sum(itemgetter(*func_keys)(NFUNCS))
@@ -721,7 +722,7 @@ def get_sub_scf_attributes(
 
     # Diagonalize fock matrix and form guess density matrix
     if fock.shape[1] > 1:
-        e, c = eigh(fock, overlap)
+        e, c = eig(fock, overlap)
         occ = mf.get_occ(e, c)
         dm = mf.make_rdm1(c, occ)
         mf.init_guess = dm
@@ -971,7 +972,7 @@ def atomic_block_minimal_basis(
         if spherically_average_fock:
             F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
 
-        e_atom, c_atom = eigh(F_ave, S_atom.copy())
+        e_atom, c_atom = eig(F_ave, S_atom.copy())
 
         def number_of_states(energies, thresh=1e-3):
             print(f'{energies=}')
@@ -1041,7 +1042,7 @@ def atomic_block_minimal_basis(
                 mask_atom[Pat_j] = True
                 smask_atom = mask_to_smask(mask_atom, smask_atom, mol.cart)
                 mask_atom = smask_to_mask(smask_atom, mol.cart)
-                _, c_mask = eigh(
+                _, c_mask = hf.eig(
                     mask_matrix(F_ave.copy(), mask_atom),
                     mask_matrix(S_atom.copy(), mask_atom)
                     )
@@ -1212,8 +1213,8 @@ def find_subspace(
     if variant == 'ecore':
         sub_hcore = scf_obj_copy.hf.get_hcore(mol)[mask_init_idx, mask_init_idx]
     elif variant == 'elden':
-        _, Cfull = eigh(F, S)
-        _, Csub = eigh(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
+        _, Cfull = eig(F, S)
+        _, Csub = eig(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
     previous_sum = get_iteration_criteria_value(
         variant, epsilon_i=Fii, nocc=nocc, sub_hcore=sub_hcore,
         Csub=Csub, Cfull=Cfull, ovlp=S[:, mask])
@@ -1456,7 +1457,7 @@ def mask_analysis(
                 submf.grids.prune = None
 
             # SCF initial guess
-            subbasis_energies, submf.mo_coeff = eigh(maskedF, maskedS)
+            subbasis_energies, submf.mo_coeff = eig(maskedF, maskedS)
             submf.mo_occs = submf.get_occ(subbasis_energies)
             # Set the symmetry occupations if present
             if irrep_nelec is not None:
@@ -1510,7 +1511,7 @@ def mask_analysis(
                 print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
         else:
             mask = mask_i
-            e, subbasis_coeffs = eigh(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
+            e, subbasis_coeffs = eig(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
             Q_sqrd = get_q_sqrd(
                 C_full, subbasis_coeffs,
                 ovlp[:,mask], nocc
