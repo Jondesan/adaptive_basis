@@ -47,18 +47,16 @@ def tk_debugger(*vars):
 def dual_basis_energy_correction(
     scf_obj: scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
     P_full_projected: np.ndarray
-    ) -> float:
-                
-    correction = 0.0
+    ) -> tuple[float, float]:
+
     F_full = scf_obj.get_fock(dm=P_full_projected)
-    E_new, C_new = hf.eig(F_full, scf_obj.get_ovlp())
+    E_new, C_new = scf_obj.eig(F_full, scf_obj.get_ovlp())
     P_new = scf_obj.make_rdm1(
         mo_coeff=C_new,
         mo_occ=scf_obj.get_occ(mo_energy=E_new, mo_coeff=C_new))
     dP = P_new - P_full_projected
-    correction = np.trace(dP @ F_full)
-
-    return correction
+    
+    return np.trace(dP @ F_full), scf_obj.e_tot
 
 
 def eigh(
@@ -1501,7 +1499,7 @@ def mask_analysis(
                     subbasis_mol,
                     P_sub,
                     fullbasis_mol)
-                dE = dual_basis_energy_correction(
+                dE, E_HF_largebasis = dual_basis_energy_correction(
                     fullbasis_mol.HF(),
                     P_full_projected,
                 )
@@ -1542,6 +1540,7 @@ def mask_analysis(
                 Q_sqrd,
                 copy.deepcopy(smask if is_smask else mask),
                 dE,
+                E_HF_largebasis,
             ])
         last_mask = copy.deepcopy(mask)
         if is_smask:
