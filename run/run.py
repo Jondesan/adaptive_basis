@@ -170,7 +170,7 @@ def run_abs(
     datacols = ["nfunc", "cursum", "diff", "E_scf", "E_orb", "Qsqrd", "smask"]
     calculate_DB_correction = True
     if calculate_DB_correction:
-        datacols.append('dE')
+        datacols.extend(['dE', 'E_HF_largebasis'])
 
     for molfilename, mol, shellsep_mol, shells, init_guess, basisname in mol_list:
         # Open the output file
