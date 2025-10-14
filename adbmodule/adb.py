@@ -489,152 +489,6 @@ def linked_shell_idx(smask: np.ndarray) -> np.ndarray:
             shl_indices.append(indices)
     return shl_indices
 
-def expand_mask(
-    F:                      np.ndarray,
-    S:                      np.ndarray,
-    nocc:                   tuple,
-    mask:                   np.ndarray,
-    smask:                  np.ndarray | None   = None,
-    variant:                str                 = 'enocc',
-    hcore:                  np.ndarray | None   = None,
-    Cfull:                  np.ndarray | None   = None,
-    link_shells:            bool                = True,
-    nfunc_normalisation:    bool                = True,
-    ) -> tuple[np.ndarray, float, float, np.ndarray | None]:
-    r"""Expands the current mask by either one function or one shell
-    based on smask.
-
-    Args:
-        F : ndarray
-            Full Fock matrix
-        S : ndarray
-            Full overlap matrix
-        nocc : tuple
-            Number of occupied alpha and beta orbitals
-        mask : ndarray
-            The current mask. A logical 1d array
-        smask : None or ndarray
-            If None functions are tested individually. Else shell by
-            shell testing is used where shells are determined by the
-            smask array, where the elements represent the number of
-            functions per current shell. The shells are ordered in the
-            PySCF internal format
-        variant : str
-            Which variant to use. Specifies what will be the
-            minimisation criteria for adding a function/shell.
-            enocc: $\sum_{i}^{nocc}\epsilon_i$,
-               where $epsilon_i$ are the occupied diagonal Fock matrx
-               elements
-            ecore: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
-               where $h_{ii}=C_i^\dagger H_{core}C_i$
-            elden: $\Delta Q$,
-               which is $1-\frac{1}{nocc}
-                * \sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
-        link_shells : bool
-            Whether to link shells of atoms of same type in the mask
-            Optional, default is True
-        nfunc_normalisation : bool
-            Whether to normalise the criteria with the number of added
-            functions.
-            Optional, deault is True
-        dft : bool
-            Hartree-Fock or DFT.
-            Optional, default is False
-        xc : str
-            XC functional string accepted by PySCF.
-            Optional, default is 'b3lyp'.
-        grid_level : int
-            predefined integration grid levels, 0-9
-            (0 very sparse, 9 very dense). Optional, default is 3.
-
-    Returns:
-        The new mask (boolean ndarray), the current difference in
-        eigenvalue sums and the current sum (energy sum of occupied
-        orbitals), shell mask if smask is provided.
-    """
-    RHF = (len(F.shape) == 2)
-    maskedF = mask_matrix(F, mask, RHF)
-    maskedS = mask_matrix(S, mask)
-    evals, coeffs = eig(maskedF, maskedS)
-    last_sum = 0.0
-    if Cfull is None and variant == 'elden':
-        _, Cfull = eig(F, S)
-    last_sum = get_iteration_criteria_value(
-        variant, epsilon_i=evals, nocc=nocc,
-        sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-        Cfull=Cfull, ovlp=S[:, mask])
-
-    test_sums = []    
-    if smask is None:
-        for i, m in enumerate(mask):
-            if m:
-                continue
-
-            test_mask = copy.deepcopy(mask)
-            test_mask[i] = True
-            maskedF = mask_matrix(F, test_mask, RHF)
-            maskedS = mask_matrix(S, test_mask)
-            evals, coeffs = eig(maskedF, maskedS)
-
-            test_sums.append(
-                (i,
-                get_iteration_criteria_value(
-                    'enocc', epsilon_i=evals, nocc=nocc,
-                    sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-                    Cfull=Cfull, ovlp=S[:, test_mask]),
-                1))
-    else:
-        # Gather indices of duplicate shells if link_shells enabled
-        # (if system has more than 1 atom of same type,
-        #  shells will be duplicated.)
-        if link_shells:
-            shl_indices = linked_shell_idx(smask)
-        else:
-            shl_indices = [[i] for i in range(len(smask))]
-
-        for i, sidx in enumerate(shl_indices):
-            if smask[sidx][0, 0]:
-                continue
-            test_smask = copy.deepcopy(smask)
-
-            submask = test_smask[sidx]
-            submask[:, 0] = True
-            test_smask[sidx] = submask
-            test_mask = smask_to_mask(test_smask)
-
-            maskedF = mask_matrix(F, test_mask, RHF)
-            maskedS = mask_matrix(S, test_mask)
-            evals, coeffs = eig(maskedF, maskedS)
-            
-            func_keys = [shell[3] for shell in submask[:,3]]
-            nfuncs = np.sum(itemgetter(*func_keys)(NFUNCS))
-            test_sums.append(
-                (i,
-                get_iteration_criteria_value(
-                    variant, epsilon_i=evals, nocc=nocc,
-                    sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-                    Cfull=Cfull, ovlp=S[:, test_mask]),
-                nfuncs))
-
-    if nfunc_normalisation:
-        test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]
-    else:
-        test_differences = [(test_sum[1] - last_sum) for test_sum in test_sums]
-    if variant == 'elden':
-        array_index = np.argmax(test_differences)
-    else:
-        array_index = np.argmin(test_differences)
-    current_idx_to_flip = test_sums[array_index][0]
-
-    if smask is None:
-        mask[current_idx_to_flip] = True
-    else:
-        submask = smask[shl_indices[current_idx_to_flip]]
-        submask[:, 0] = True
-        smask[shl_indices[current_idx_to_flip]] = submask
-        mask = smask_to_mask(smask)
-    return mask, test_differences[array_index], test_sums[array_index][1], smask
-
 
 def get_all_shell_labels(mol: gto.MoleBase) -> list[str]:
     count = np.zeros((mol.natm, 9), dtype=int)
@@ -872,7 +726,9 @@ def basis_functions_per_atom(mol: gto.MoleBase) -> np.ndarray:
     func_per_atom = np.zeros(nat, dtype=int)
     for i in range(nat):
         angl = basis_struct[basis_struct[:,0]==i][:,1]
-        func_per_atom[i] = np.sum(2*angl+1) if not mol.cart else (angl + 1)*(angl + 2) // 2
+        numc = basis_struct[basis_struct[:,0]==i][:,3] # Number of CGTOs
+        func_per_atom[i] = np.sum((2*angl+1) * numc) if not mol.cart \
+                           else np.sum((angl + 1)*(angl + 2) // 2 * numc)
     
     return func_per_atom
 
@@ -1246,10 +1102,10 @@ def find_subspace(
 
         if return_mask_history:
             if basis_initialized:
-                mask_history.append( (
-                    copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                mask_history.append(
+                    (copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
                     current_criteria_val,
-                    difference) )
+                    difference))
             else:
                 mask_history.append( (
                     copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
@@ -1276,6 +1132,153 @@ def find_subspace(
         mask = mask_history
 
     return mask
+
+
+def expand_mask(
+    F:                      np.ndarray,
+    S:                      np.ndarray,
+    nocc:                   tuple,
+    mask:                   np.ndarray,
+    smask:                  np.ndarray | None   = None,
+    variant:                str                 = 'enocc',
+    hcore:                  np.ndarray | None   = None,
+    Cfull:                  np.ndarray | None   = None,
+    link_shells:            bool                = True,
+    nfunc_normalisation:    bool                = True,
+    ) -> tuple[np.ndarray, float, float, np.ndarray | None]:
+    r"""Expands the current mask by either one function or one shell
+    based on smask.
+
+    Args:
+        F : ndarray
+            Full Fock matrix
+        S : ndarray
+            Full overlap matrix
+        nocc : tuple
+            Number of occupied alpha and beta orbitals
+        mask : ndarray
+            The current mask. A logical 1d array
+        smask : None or ndarray
+            If None functions are tested individually. Else shell by
+            shell testing is used where shells are determined by the
+            smask array, where the elements represent the number of
+            functions per current shell. The shells are ordered in the
+            PySCF internal format
+        variant : str
+            Which variant to use. Specifies what will be the
+            minimisation criteria for adding a function/shell.
+            enocc: $\sum_{i}^{nocc}\epsilon_i$,
+               where $epsilon_i$ are the occupied diagonal Fock matrx
+               elements
+            ecore: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
+               where $h_{ii}=C_i^\dagger H_{core}C_i$
+            elden: $\Delta Q$,
+               which is $1-\frac{1}{nocc}
+                * \sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
+        link_shells : bool
+            Whether to link shells of atoms of same type in the mask
+            Optional, default is True
+        nfunc_normalisation : bool
+            Whether to normalise the criteria with the number of added
+            functions.
+            Optional, deault is True
+        dft : bool
+            Hartree-Fock or DFT.
+            Optional, default is False
+        xc : str
+            XC functional string accepted by PySCF.
+            Optional, default is 'b3lyp'.
+        grid_level : int
+            predefined integration grid levels, 0-9
+            (0 very sparse, 9 very dense). Optional, default is 3.
+
+    Returns:
+        The new mask (boolean ndarray), the current difference in
+        eigenvalue sums and the current sum (energy sum of occupied
+        orbitals), shell mask if smask is provided.
+    """
+    RHF = (len(F.shape) == 2)
+    maskedF = mask_matrix(F, mask, RHF)
+    maskedS = mask_matrix(S, mask)
+    evals, coeffs = eig(maskedF, maskedS)
+    last_sum = 0.0
+    if Cfull is None and variant == 'elden':
+        _, Cfull = eig(F, S)
+    last_sum = get_iteration_criteria_value(
+        variant, epsilon_i=evals, nocc=nocc,
+        sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+        Cfull=Cfull, ovlp=S[:, mask])
+
+    test_sums = []    
+    if smask is None:
+        for i, m in enumerate(mask):
+            if m:
+                continue
+
+            test_mask = copy.deepcopy(mask)
+            test_mask[i] = True
+            maskedF = mask_matrix(F, test_mask, RHF)
+            maskedS = mask_matrix(S, test_mask)
+            evals, coeffs = eig(maskedF, maskedS)
+
+            test_sums.append(
+                (i,
+                get_iteration_criteria_value(
+                    'enocc', epsilon_i=evals, nocc=nocc,
+                    sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+                    Cfull=Cfull, ovlp=S[:, test_mask]),
+                1))
+    else:
+        # Gather indices of duplicate shells if link_shells enabled
+        # ( if system has more than 1 atom of same type, shells will be
+        #   duplicated. )
+        if link_shells:
+            shl_indices = linked_shell_idx(smask)
+        else:
+            shl_indices = [[i] for i in range(len(smask))]
+
+        for i, sidx in enumerate(shl_indices):
+            if smask[sidx][0, 0]:
+                continue
+            test_smask = copy.deepcopy(smask)
+
+            submask = test_smask[sidx]
+            submask[:, 0] = True
+            test_smask[sidx] = submask
+            test_mask = smask_to_mask(test_smask)
+
+            maskedF = mask_matrix(F, test_mask, RHF)
+            maskedS = mask_matrix(S, test_mask)
+            evals, coeffs = eig(maskedF, maskedS)
+            
+            func_keys = [shell[3] for shell in submask[:,3]]
+            nfuncs = np.sum(itemgetter(*func_keys)(NFUNCS))
+            test_sums.append(
+                (i,
+                get_iteration_criteria_value(
+                    variant, epsilon_i=evals, nocc=nocc,
+                    sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
+                    Cfull=Cfull, ovlp=S[:, test_mask]),
+                nfuncs))
+
+    if nfunc_normalisation:
+        test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]
+    else:
+        test_differences = [(test_sum[1] - last_sum) for test_sum in test_sums]
+    if variant == 'elden':
+        array_index = np.argmax(test_differences)
+    else:
+        array_index = np.argmin(test_differences)
+    current_idx_to_flip = test_sums[array_index][0]
+
+    if smask is None:
+        mask[current_idx_to_flip] = True
+    else:
+        submask = smask[shl_indices[current_idx_to_flip]]
+        submask[:, 0] = True
+        smask[shl_indices[current_idx_to_flip]] = submask
+        mask = smask_to_mask(smask)
+    return mask, test_differences[array_index], test_sums[array_index][1], smask
 
 
 def mask_analysis(
