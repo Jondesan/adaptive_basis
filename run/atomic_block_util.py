@@ -8,36 +8,250 @@ import os
 
 num_of_occupying_electrons = 1
 
-def gto(r, zeta, angl):
-    """Calculate the values of Gaussian type orbital at r for given parameters.
+def eig(h, s):
+            '''Solver for generalized eigenvalue problem
 
-    Args:
-        r : float or arraylike
-            Value(s) of r at which the function is evaluated
-        zeta : float
-            Exponent
-        angl : int | float
-            Angular momentum
-    """
-    zeta = np.asarray(zeta)
-    return r**angl * np.exp(-zeta * r**2)
+            .. math:: HC = SCE
+            '''
+            from scipy.linalg import eigh
+            e, c = eigh(h, s)
+            idx = np.argmax(abs(c.real), axis=0)
+            c[:,c[idx,np.arange(len(e))].real<0] *= -1
+            return e, c, idx
 
-def cgto(r, params):
-    """Calculate the values of a contracted Gaussian type orbital at r
-    for given parameters.
 
-    Args:
-        params : arraylike
-            The parameters of the form
-            [angl, [exp1, exp2, ...], [contr1, contr2, ...]]
-    """
-    if isinstance(r, float):
-        return np.sum(np.asarray(params[2]) * gto(r, params[1], params[0]))
-    else:
-        vals = np.zeros(len(r))
-        for i in range(vals.shape[0]):
-            vals[i] = np.sum(np.asarray(params[2]) * gto(r[i], params[1], params[0]))
-    return vals
+class BlockDecomposedMol:
+    def __init__(
+        self,
+        mol,
+        initial_guess='atom',
+    ) -> None:
+        self.mol = mol
+        self.atom_labels = [atom[0] for atom in self.mol._atom]
+        self.mf = mol.HF()
+        self.initial_guess = initial_guess
+        self.bfpa = adb.basis_functions_per_atom(mol)
+        self.scf_initialized = False
+        bfpa_cumsum = np.cumsum(self.bfpa)
+        # Store the atomic block index ranges
+        self.atomic_function_ranges = np.array([[0, bfpa_cumsum[0]-1]])
+        self.atomic_function_ranges = np.append(
+            self.atomic_function_ranges, 
+            np.array(list(
+                zip(bfpa_cumsum[:-1], bfpa_cumsum[1:]-1)
+            )),
+            axis=0
+        )
+
+        self.ao_labels = pyscf.gto.mole.cart_labels(self.mol) if self.mol.cart \
+            else pyscf.gto.mole.sph_labels(self.mol)
+        self.dm0 = None
+        self.fock = None
+
+
+    def list_all_ao_labels(self) -> None:
+        print("Printing all available atomic orbitals:")
+        for i, label in enumerate(self.ao_labels):
+            print(f'{i:4}: {label}')
+        print()
+
+
+    def get_orbitals_in_block(self, which_block) -> np.ndarray:
+        """Return list of indices of the available orbitals
+        in the given atomic block.
+
+        Indices range from 0 to N_k-1 where N_k is the number of
+        functions in the atomic block.
+        
+        Args:
+        
+        
+        Returns:
+        """
+        ra, rb = self.atomic_function_ranges[which_block]
+        return np.arange(0, rb - ra + 1)
+
+
+    def initialize_scf_object(self) -> None:
+        print('###############################')
+        print(' Initializing the SCF object')
+        print('  and calculating the initial')
+        print('  guess orbitals in full basis')
+        print('###############################\n\n')
+
+        self.mf.sap_basis = 'sapgraspsmall'
+        self.dm0 = self.mf.get_init_guess(key = self.initial_guess)
+        self.fock = self.mf.get_fock(dm = self.dm0)
+        self.scf_initialized = True
+
+
+    def calculate_orbitals_of_atomic_block(
+        self,
+        which_block=0,
+    ) -> tuple:
+        
+        if which_block < 0 or \
+           which_block > len(self.atomic_function_ranges) - 1:
+            raise ValueError("The atomic block being accessed does not exist")
+
+        if self.fock is None:
+            self.initialize_scf_object()
+        
+        ra, rb = self.atomic_function_ranges[which_block]
+        Fatom = deepcopy(self.fock[ra:rb + 1, ra:rb + 1])
+        Satom = deepcopy(self.mf.get_ovlp()[ra:rb + 1, ra:rb + 1])
+
+        energies, coeffs, idx = eig(Fatom, Satom)
+        
+        return energies, coeffs, idx
+
+
+    def output_orbital_cub(
+        self,
+        coeff,
+        which_block,
+        which_orbital,
+        cubefilename,
+    ) -> None:
+
+        ra, _ = self.atomic_function_ranges[which_block]
+        # ioo = index of orbital in full system
+        ioo = ra + which_orbital
+
+        padded_coeff = self.pad_Cmatrix(coeff, which_block, which_orbital)
+        pyscf.tools.cubegen.orbital(
+            self.mol,
+            cubefilename,
+            padded_coeff[:,ioo]
+        )
+
+
+    def output_density_cub(
+        self,
+        coeff,
+        which_block,
+        which_orbital,
+        cubefilename,
+        num_of_occupying_electrons=1
+    ) -> None:
+        
+        occupations = np.zeros(mol.nao_nr())
+        ra, _ = self.atomic_function_ranges[which_block]
+        # ioo = index of orbital in full system
+        ioo = ra + which_orbital
+        occupations[ioo] = num_of_occupying_electrons
+        padded_coeff = self.pad_Cmatrix(coeff, which_block, which_orbital)
+        dm = pyscf.scf.hf.make_rdm1(padded_coeff, occupations)
+        pyscf.tools.cubegen.density(
+            mol,
+            cubefilename,
+            dm
+        )
+
+
+    def index_of_orbital_in_full_sys(
+            self,
+            which_block,
+            which_orbital
+    ) -> int:
+        """Finds the index of the orbital with respect to the full system.
+        
+        Args:
+        
+        
+        Returns:
+        """
+        ra, _ = self.atomic_function_ranges[which_block]
+        # ioo = index of orbital in full system
+        ioo = ra + which_orbital    
+
+        return ioo
+
+
+    def pad_Cmatrix(
+        self,
+        coeff,
+        which_block,
+        which_orbital
+    ) -> np.ndarray:
+        
+        padded_coeff = np.zeros((mol.nao_nr(), mol.nao_nr()))
+        ra, rb = self.atomic_function_ranges[which_block]
+        # ioo = index of orbital in full system
+        ioo = ra + which_orbital
+                
+        padded_coeff[ra:rb+1, ioo] = deepcopy(coeff[:, which_orbital])
+        return padded_coeff
+
+
+    def calc_isoval(
+        self,
+        coeff                   : np.ndarray,
+        which_block             : int,
+        which_orbital           : int = 0,
+        fraction                : float = .9,
+    ) -> tuple:
+
+        print( 'Calculating density and orbital isovalue')
+        print(f'containing {fraction} of the electron density')
+        
+        ra, _ = self.atomic_function_ranges[which_block]
+        # ioo = index of orbital in full system
+        ioo = ra + which_orbital
+        
+        print(f'Calculating for atomic orbital {self.ao_labels[ioo]}\n')
+        
+        padded_coeff = self.pad_Cmatrix(coeff, which_block, which_orbital)
+
+        return calculate_isovalue_for_fraction_of_charge(
+            padded_coeff,
+            self.mol,
+            which_mo_to_calculate=ioo,
+            fraction=fraction,
+        )
+
+
+    def generate_orbital_cub_from_atomic_calc(
+            self,
+            which_block,
+            which_orbital,
+            cubefilename,
+    ) -> tuple:
+        """
+        """
+
+        asymb = self.mol._atom[which_block][0]
+        acoords = ' '.join([str(x) for x in self.mol._atom[which_block][1]])
+
+        atom_def = f'{asymb} {acoords}'
+        mol2 = pyscf.M(
+            atom=atom_def,
+            basis='aug-pc-1')
+        mf = mol2.HF()
+        mf.kernel()
+        coeff = mf.mo_coeff
+
+        isovalue_data = self.calc_isoval(coeff, which_block, which_orbital)
+        self.output_orbital_cub(coeff, which_block, which_orbital, cubefilename)
+        
+        return isovalue_data
+
+
+    def __str__(self) -> str:
+        string_rep = ""
+        string_rep += "Block decomposed molecule with atoms\n"
+        string_rep += f"{str(self.atom_labels)}\n\n"
+        string_rep += "Atomic function index ranges:\n"
+        for i, index_range in enumerate(self.atomic_function_ranges):
+            string_rep += f"{self.atom_labels[i]} -> {index_range}"
+            string_rep += f" ({index_range[1] - index_range[0] + 1}"
+            string_rep += " functions in atomic basis)\n"
+
+        string_rep += "\n"
+        string_rep += "The SCF calculation object has "
+        string_rep += f"{"" if self.scf_initialized else "not "}been initialized!\n"
+
+        return string_rep
 
 def exract_basis_data_from_molecule(
     mol:    pyscf.gto.MoleBase
@@ -57,39 +271,42 @@ def exract_basis_data_from_molecule(
             exps = np.asarray(angular_basis[1:]).T[0]
             for contr_coeffs in np.asarray(angular_basis[1:])[:,1:].T:
                 if mol.cart:
-                    for i in range((angl+1)*(angl+2)/2):
+                    for i in range((angl + 1) * (angl + 2) / 2):
                         functions.append([angl, exps, list(contr_coeffs)])
                 else:
-                    for i in range(2*angl+1):
+                    for i in range(2 * angl + 1):
                         functions.append([angl, list(exps), list(contr_coeffs)])
             
     return functions
 
-def number_of_states(energies, nfunc_per_minimal_atom, nfuncs, thresh=1e-3):
+def number_of_states(
+        energies,
+        nfunc_per_minimal_atom,
+        nfuncs,
+        thresh = 1e-3):
     nfuncs_include = nfunc_per_minimal_atom
     # Handle degeneracies
     while nfuncs_include < nfuncs \
-        and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
+        and energies[nfuncs_include] - energies[nfunc_per_minimal_atom - 1] < thresh:
         nfuncs_include += 1
     return nfuncs_include
 
 
 def init_atomic_mask(nao, funcs_per_atom, offset_idx, nfunc_tot):
-    mask = np.zeros(nao, dtype=bool)
+    mask = np.zeros(nao, dtype = bool)
     func_offset = np.sum(funcs_per_atom[:offset_idx])
     mask[func_offset:func_offset+nfunc_tot] = True
     return mask
 
 def nfunc_in_atom_minimal_basis(asymb, nelec_ECP):
     Z = pyscf.data.elements.ELEMENTS.index(asymb)
-    return int(np.ceil( (Z-nelec_ECP) / 2 ))
+    return int(np.ceil((Z - nelec_ECP) / 2))
 
 def atomic_block_orbital_output(
     mol:                        pyscf.gto.MoleBase,
     F:                          np.ndarray,
     S:                          np.ndarray,
     output:                     str,
-    get_mask_history:           bool            = True,
     spherically_average_fock:   bool            = False,
     which_mo_to_calculate:      int             = 0,
     ) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
@@ -130,17 +347,23 @@ def atomic_block_orbital_output(
         if spherically_average_fock:
             F_ave = adb.spherical_average(F_ave, [shell[1] for shell in smask_atom])
 
-        e_atom, c_atom = pyscf.scf.hf.eig(F_ave, S_atom.copy())
+        
+
+        e_atom, c_atom, sorted_idx = eig(F_ave, S_atom.copy())
+        # e_atom, c_atom = pyscf.scf.hf.eig(F_ave, S_atom.copy())
         coeff = np.zeros(F.shape)
         c_atom_idx = 0
         for j, flag in enumerate(mask):
             if flag:
                 coeff[j, mask] = c_atom[c_atom_idx]
                 c_atom_idx += 1
-        
         occupations = np.zeros(mol.nao_nr())
         func_offset = np.sum(func_per_atom[:i])
         occupations[func_offset + which_mo_to_calculate] = num_of_occupying_electrons
+        sorted_idx = 0
+        print_orbital_label(mol, func_offset,
+                            which_mo_to_calculate = which_mo_to_calculate,
+                            reindexing = sorted_idx)
         dm = pyscf.scf.hf.make_rdm1(coeff, occupations)
         # pyscf.tools.cubegen.density(
         #     mol,
@@ -151,9 +374,8 @@ def atomic_block_orbital_output(
         calculate_isovalue_for_fraction_of_charge(
             coeff,
             mol,
-            mol.nao_nr(),
             which_mo_to_calculate=func_offset + which_mo_to_calculate,
-            fraction=.9)
+            fraction = .9)
         print('\n')
         # pyscf.tools.cubegen.orbital(
         #     mol,
@@ -164,16 +386,60 @@ def atomic_block_orbital_output(
     return None
 
 
+def print_orbital_label(
+        mol,
+        func_offset,
+        which_mo_to_calculate = 0,
+        reindexing = 0):
+    """Print a given orbital label
+
+    Args:
+    mol : pyscf.gto.MoleBase
+        The PySCF molecule object
+    func_offset : int
+        The index offset with respect to the whole molecule.
+    which_mo_to_calculate : int
+        Index of the MO which is considered.
+    reindexing : int | array | np.array
+        Either a scalar or an array of ints. Reorders the labels. If scalar,
+        no reordering is done.
+    """
+    if np.isscalar(reindexing):
+        reindexing = np.asarray(range(0, mol.nao - 1 - func_offset))
+    if mol.cart:
+        print(np.asarray(pyscf.gto.mole.cart_labels(mol))[func_offset + reindexing][which_mo_to_calculate])
+    else:
+        print(np.asarray(pyscf.gto.mole.sph_labels(mol))[func_offset + reindexing][which_mo_to_calculate])
+
+
 def calculate_isovalue_for_fraction_of_charge(
         coeff,
         mol,
-        nao_in_mol,
         which_mo_to_calculate : int = 0,
         fraction : float            = .9,
-        MAX_ITER : int              = 50
-):
-    mf = mol.HF()
+    ):
+    """Calculate an isovalue for the electron density of a given orbital
+    which contains 'fraction' of the charge.
 
+    Args:
+    coeff : np.ndarray
+        The orbital coefficients of the orbitals considered. Must be
+        padded so dimensions correspond to those of mol.
+    mol : pyscf.gto.MoleBase
+        The PySCF molecule object.
+    which_mo_to_calculate : int
+        Index of the MO which is considered.
+    fraction : float
+
+    
+    Returns:
+
+    """
+    if fraction < 0.0 or fraction > 1.0:
+        raise ValueError("Given 'fraction' is not a within suitable range: "+
+                         f"fraction={fraction}, should be within [0.0, 1.0]!")
+    mf = mol.HF()
+    nao_in_mol = mol.nao_nr()
     occupations = np.zeros(nao_in_mol)
     occupations[which_mo_to_calculate] = num_of_occupying_electrons
 
@@ -183,123 +449,63 @@ def calculate_isovalue_for_fraction_of_charge(
     weights = dft_grid.weights
     coords = dft_grid.coords
 
-    # return None
     aos = pyscf.dft.numint.eval_ao(mol, coords)
-    # aos_3d_grid = aos[:,which_mo_to_calculate].reshape((Ngrid, Ngrid, Ngrid))
     rho = pyscf.dft.numint.eval_rho2(
         mol, aos, coeff, occupations
     )
-    # rho_3d_grid = rho.reshape((Ngrid, Ngrid, Ngrid))
     aos = aos[:, which_mo_to_calculate]
-
-    def Q_of_iso(iso):
-        mask = rho >= iso
-        return np.sum(rho[mask] * weights if np.isscalar(weights) \
-               else rho[mask] * weights[mask])
-
-    Qtot = np.sum(rho * weights)
-    Qtarget = fraction * Qtot
-    iso_lo = rho.min()
-    iso_hi = rho.max()
-    # Bisection
-    q_lo = Q_of_iso(iso_lo)  # should be Qtot
-
-    # ensure monotonicity holds
-    if q_lo < Qtarget:
-        raise RuntimeError("Q(t_lo) < Qtarget: unexpected")
-
-    tol_charge = 1e-6
-    tol_iso = 1e-9
-    for _ in range(MAX_ITER):
-        iso_mid = 0.5 * (iso_lo + iso_hi)
-        q_mid = Q_of_iso(iso_mid)
-
-        if  abs(q_mid - Qtarget) <= tol_charge or \
-               (iso_hi - iso_lo) <= tol_iso:
-            break
-
-        # If q_mid > Qtarget, need larger t to reduce enclosed charge
-        if q_mid > Qtarget:
-            iso_lo = iso_mid
-        else:
-            iso_hi = iso_mid
     
 
-    achieved_fraction = q_mid / Qtot
-    print(f'{iso_mid=}\n{achieved_fraction=}\n{q_mid=}')
-    print(f'The isovalue for the orbital: {np.sqrt(iso_mid)}')
-    print(f'{np.sum(aos*weights)=}')
+    # Sort from high -> low
+    sort_idx = np.argsort(rho)[::-1]
+    sorted_rho = rho[sort_idx]
+    # Calculate charge from integrated density and weights
+    charges = sorted_rho * weights[sort_idx]
+    cumulative_charge = np.cumsum(charges)
+    Qtot = cumulative_charge[-1]
+    target_charge = fraction * Qtot
+    # Binary search for the cutoff
+    idx = np.searchsorted(cumulative_charge, target_charge)
+    achieved_Q = cumulative_charge[idx]
+    iso_target = sorted_rho[idx]
+    
+    achieved_fraction = achieved_Q / Qtot
+    print(f'{iso_target=}\n{achieved_fraction=}\n{achieved_Q=}')
+    print(f'The isovalue for the orbital: {np.sqrt(iso_target)}')
     print(f'{np.sum(rho*weights)=}')
 
-    return iso_mid, achieved_fraction, q_mid
+    return iso_target, achieved_fraction, achieved_Q
 
 
 if __name__ == "__main__":
-    mol = pyscf.M(atom='/home/joonahuh/uni/electronic_structure/benchmarks/pom_geom/xyz/h2o.charge0.spin0.xyz', basis='aug-pc-1')
-    mf = mol.HF()
+    mol = pyscf.M(atom = '/home/joonahuh/uni/electronic_structure/benchmarks/pom_geom/xyz/h2o.charge0.spin0.xyz', basis = 'def2-tzvp')
 
-    mf.sap_basis = 'sapgraspsmall'
-    dm0 = mf.get_init_guess(key='atom')
-    F = mf.get_fock(dm=dm0)
+    bdmol = BlockDecomposedMol(mol)
+    bdmol.initialize_scf_object()
+    print(bdmol)
 
-    which_mo_to_calculate = 3
+    bdmol.list_all_ao_labels()
 
-    atomic_block_orbital_output(
-        mol,
-        F,
-        mf.get_ovlp(),
-        'orbital_atomic_block.cub',
-        which_mo_to_calculate=which_mo_to_calculate)
+    atomic_block_to_compute = 1
+    orbital = 3
+    energy, coeff, idx = bdmol.calculate_orbitals_of_atomic_block(
+        which_block=atomic_block_to_compute)
     
-    # Generate orbital from atomic calculation
-    mol2 = pyscf.M(atom=f'{mol._atom[0][0]} {' '.join([str(x) for x in mol._atom[0][1]])}', basis='aug-pc-1')
-    mf = mol2.HF()
-    mf.kernel()
-    coeff = mf.mo_coeff
-    # Pad the array with zeros to fit the length of the molecule array
-    coeff = np.pad(coeff, (0, mol.nao_nr() - len(coeff)), constant_values=(0.0,0.0))
-    print('\nIsovalue calculation for the atomic SCF:\n')
-    calculate_isovalue_for_fraction_of_charge(
-        mf.mo_coeff,
-        mol2,
-        mol2.nao_nr(),
-        which_mo_to_calculate=which_mo_to_calculate,
-        fraction=.9,
-    )
-
-    occupations = np.zeros(F.shape[0])
-    occupations[which_mo_to_calculate] = 2
-    dm = pyscf.scf.hf.make_rdm1(coeff, occupations)
-    # pyscf.tools.cubegen.density(
-    #     mol,
-    #     'density_scf.cub',
-    #     dm
-    # )
-
-    # pyscf.tools.cubegen.orbital(
-    #         mol,
-    #         'orbital_scf.cub',
-    #         coeff[:,which_mo_to_calculate]
-    #     )
-
-
-    # functions = exract_basis_data_from_molecule(mol)
-    # for i, func in enumerate(functions):
-    #     print(i, func)
-
-    # fig, ax = plt.subplots(1, 1, figsize=(10,4), tight_layout=True)
-
-    # x = np.linspace(-10, 10, 1000)
-
-    # coeffs = mf.mo_coeff[24] # Coefficients to form the
-    #                         # linear combination for the MO
-    # idx = coeffs > 1e-10
-
-    # y = np.sum(
-    #     [contr*cgto(x, func) \
-    #         for func, contr in \
-    #         zip(list(compress(functions, idx)), list(compress(coeffs, idx)))],
-    #         axis=0)
+    isoval, achieved_fraction, achieved_Q = bdmol.calc_isoval(
+        coeff,
+        atomic_block_to_compute, orbital)
+    # bdmol.output_density_cub(
+    #     coeff,
+    #     atomic_block_to_compute, orbital,
+    #     'test_density_cubefile.cub')
+    # bdmol.output_orbital_cub(
+    #     coeff,
+    #     atomic_block_to_compute, orbital,
+    #     'test_orbital_cubefile.cub')
     
-    # ax.plot(x, y)
-    # plt.show()
+    # isovalue_data = bdmol.generate_orbital_cub_from_atomic_calc(
+    #     atomic_block_to_compute, orbital,
+    #     'test_orbital_atomic_cubefile.cub')
+    
+    # print(isovalue_data)
+    
