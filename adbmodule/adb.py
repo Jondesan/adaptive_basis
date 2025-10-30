@@ -39,7 +39,7 @@ NFUNCS = {
 def tk_debugger(*vars):
     print('######## TEEKKARIN DEBUGGER #############################')
     for var in vars:
-        print(var, end=' ')
+        print(var, end = ' ')
     print()
     print('######## TEEKKARIN DEBUGGER END #########################')
 
@@ -49,11 +49,11 @@ def dual_basis_energy_correction(
     P_full_projected: np.ndarray
     ) -> tuple[float, float]:
 
-    F_full = scf_obj.get_fock(dm=P_full_projected)
+    F_full = scf_obj.get_fock(dm = P_full_projected)
     E_new, C_new = scf_obj.eig(F_full, scf_obj.get_ovlp())
     P_new = scf_obj.make_rdm1(
-        mo_coeff=C_new,
-        mo_occ=scf_obj.get_occ(mo_energy=E_new, mo_coeff=C_new))
+        mo_coeff = C_new,
+        mo_occ = scf_obj.get_occ(mo_energy = E_new, mo_coeff = C_new))
     dP = P_new - P_full_projected
     
     return np.trace(dP @ F_full), scf_obj.e_tot
@@ -138,7 +138,7 @@ def extract_basis(
     current_id = -1
     # Collect unique atom smasks (if same atom is present in the shellsep_mol
     # more than once, ignore its mask after the first one)
-    for elem in copy.deepcopy(smask[np.asarray(smask[:, 0], dtype=bool)]):
+    for elem in copy.deepcopy(smask[np.asarray(smask[:, 0], dtype = bool)]):
         if elem[3][1] not in found_atoms:
             found_atoms.append(elem[3][1])
             current_id = elem[3][0]
@@ -170,8 +170,8 @@ def extract_basis(
             # Remove rows and columns with all 0 contraction coeffs
             filtered_shell = coeff_table[
                 ~((coeff_table[:, 0] != 0) &
-                (coeff_table[:, 1:] == 0).all(axis=1))]
-            filtered_shell = filtered_shell[~np.all(filtered_shell == 0, axis=1)]
+                (coeff_table[:, 1:] == 0).all(axis = 1))]
+            filtered_shell = filtered_shell[~np.all(filtered_shell == 0, axis = 1)]
             if not filtered_shell.tolist():
                 basis[key].pop(i)
             else:
@@ -246,7 +246,7 @@ def get_uncontracted_basis(
         The basis as a pySCF formatted string, which can be used with
         pyscf.gto.basis.parse.
     """
-    line = 'BASIS "ao basis" PRINT\n'
+    line  = 'BASIS "ao basis" PRINT\n'
     basis = ""
 
     if fn is not None:
@@ -358,7 +358,7 @@ def init_smask(
         if nelec_ecp == 0 or angl > 3:
             shl_start = count[ia, angl] + angl + 1
         else:
-            coreshl = core_configuration(nelec_ecp, atom_symbol=_std_symbol(symb))
+            coreshl = core_configuration(nelec_ecp, atom_symbol = _std_symbol(symb))
             shl_start = coreshl[angl] + count[ia, angl] + angl + 1
         count[ia, angl] += nc
         for n in range(shl_start, shl_start + nc):
