@@ -804,7 +804,8 @@ def atomic_block_minimal_basis(
     nfuncs_min_tot = 0
     for i,funcs_and_atom in enumerate(zip(func_per_atom, atoms)):
         nfuncs, atom = funcs_and_atom
-        print(f'{atom=}')
+        if verbose:
+            print(f'{atom=}')
         smask_atom = list(filter(lambda x: x[3][0] == i, smask))
         mask = np.zeros(mol.nao, dtype=bool)
         mask_atom = np.zeros(func_per_atom[i], dtype=bool)
@@ -816,12 +817,12 @@ def atomic_block_minimal_basis(
         # not counting ECP electrons
         nfunc_per_minimal_atom = int(np.ceil(
             (ELEMENTS.index(atom)-mol.atom_nelec_core(i)) / 2))
-        print(f'{nfunc_per_minimal_atom=}')
-        print(f'{nfuncs=}')
+        if verbose:
+            print(f'{nfunc_per_minimal_atom=}')
+            print(f'{nfuncs=}')
         # Add to molecule minimal number of functions
         nfuncs_min_tot += nfunc_per_minimal_atom
         
-        # TODO: fix the shell array (currently for whole mol, not just atomic block)
         F_ave = F_atom.copy()
         if spherically_average_fock:
             F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
@@ -829,20 +830,21 @@ def atomic_block_minimal_basis(
         e_atom, c_atom = eig(F_ave, S_atom.copy())
 
         def number_of_states(energies, thresh=1e-3):
-            print(f'{energies=}')
+            if verbose:
+                print(f'{energies=}')
             nfuncs_include = nfunc_per_minimal_atom
             # Handle degeneracies
             while nfuncs_include < nfuncs \
               and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
-                # print(f'{nfuncs_include=} {energies[nfuncs_include]=}')
                 nfuncs_include += 1
             return nfuncs_include
 
 
         if restricted:
             nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
-            print(f'{nocca=}, {noccb=}')
-            print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
+            if verbose:
+                print(f'{nocca=}, {noccb=}')
+                print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
             occs = np.zeros(c_atom.shape[1])
             occs[:nocca] = 2
             P_atom = np.abs(
@@ -850,8 +852,9 @@ def atomic_block_minimal_basis(
             )
         else:
             nocca, noccb = number_of_states(e_atom[0]), number_of_states(e_atom[1])
-            print(f'Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV')
-            print(f'Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV')
+            if verbose:
+                print(f'Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV')
+                print(f'Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV')
             occs = np.zeros((2, c_atom.shape[2]))
             occs[0, :nocca] = 1
             occs[1, :noccb] = 1
@@ -860,7 +863,8 @@ def atomic_block_minimal_basis(
                 c_atom[1] @ np.diag(occs[1]) @ c_atom[1].conj().T
                 )
         Qlim = nocca+noccb
-        print(f'{Qlim=}')
+        if verbose:
+            print(f'{Qlim=}')
 
         if verbose:
             with np.printoptions(precision=2, suppress=True):
