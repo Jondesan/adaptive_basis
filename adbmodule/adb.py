@@ -780,7 +780,6 @@ def atomic_block_minimal_basis(
     Q_tol:                      float           = 1.0,
     by_shell:                   bool            = True,
     get_mask_history:           bool            = True,
-    link_shells:                bool            = False,
     verbose:                    bool            = True,
     spherically_average_fock:   bool            = True,
     ) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
@@ -911,7 +910,7 @@ def atomic_block_minimal_basis(
                     full_mask[func_offset + Pat_i] = True
                     full_mask[func_offset + Pat_j] = True
                     full_smask = mask_to_smask(full_mask, smask.copy(), mol.cart)
-                    mask_history.append(full_smask)
+                    mask_history.append(copy.deepcopy(full_smask))
 
                 # set elements i,j and j,i of P_atom to zero
                 P_atom[mask_atom, :] = 0
@@ -939,6 +938,217 @@ def atomic_block_minimal_basis(
     if get_mask_history:
         return minimal_basis_mask, mask_history
     return minimal_basis_mask
+
+
+def pair_by_nearest_neighbor(
+        mol: gto.MoleBase
+    ) -> list:
+
+    paired_coord_indices = []
+
+    for idx, atom in enumerate mol._atom:
+        # Get flattened list of already paired indices
+        already_paired = list(sum(paired_coord_indices, ()))
+        # Add the index of the atom being currently looked at
+        # so we do not consider the atom itself as nearest neighbor
+        already_paired.append(idx)
+
+        # Consider only atoms not already paired up
+        atoms_to_consider = [mol._atom[i] for i in range(mol.natm) and not in already_paired]
+
+    return None
+
+
+def pseudominimal_basis_nearest_neighbor(
+    mol:                        gto.MoleBase,
+    F:                          np.ndarray,
+    S:                          np.ndarray,
+    Q_tol:                      float           = 1.0,
+    by_shell:                   bool            = True,
+    get_mask_history:           bool            = True,
+    verbose:                    bool            = True,
+    spherically_average_fock:   bool            = True,
+    inclusive_uneven:           bool            = True,
+    ) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
+    """Create minimal basis from atomic block decomposition
+       by pairing the atoms in the molecule by their nearest
+       neighbor.
+
+    Args:
+        mol :
+
+        F :
+        
+        S :
+
+        Q_tol :
+
+        by_shell :
+
+        get_mask_history : 
+
+        verbose : 
+
+        spherically_average_fock : 
+
+        inclusive_uneven : bool
+            Boolean flag, controls whether an unpaired atom will be included as
+            a third atom in a pair closest to it when the mol object has an
+            uneven number of atoms.
+    """
+    func_per_atom = basis_functions_per_atom(mol)
+    assert np.sum(func_per_atom) == mol.nao
+
+    minimal_basis_mask = np.zeros(mol.nao, dtype=bool)
+    smask = init_smask(mol, mol.cart)
+    if get_mask_history:
+        mask_history = []
+        full_mask = np.zeros(mol.nao, dtype=bool)
+
+    atoms = list(map(lambda x: x[0], mol._atom))
+
+    restricted = (len(F.shape) == 2)
+    
+    # Loop through atomic blocks in the Fock matrix
+    nfuncs_min_tot = 0
+    for i,funcs_and_atom in enumerate(zip(func_per_atom, atoms)):
+        nfuncs, atom = funcs_and_atom
+        if verbose:
+            print(f'{atom=}')
+        smask_atom = list(filter(lambda x: x[3][0] == i, smask))
+        mask = np.zeros(mol.nao, dtype=bool)
+        mask_atom = np.zeros(func_per_atom[i], dtype=bool)
+        func_offset = np.sum(func_per_atom[:i])
+        mask[func_offset:func_offset+nfuncs] = True
+        S_atom = mask_matrix(S, mask)
+        F_atom = mask_matrix(F, mask)
+        # Number of functions in minimal basis of current atom,
+        # not counting ECP electrons
+        nfunc_per_minimal_atom = int(np.ceil(
+            (ELEMENTS.index(atom)-mol.atom_nelec_core(i)) / 2))
+        if verbose:
+            print(f'{nfunc_per_minimal_atom=}')
+            print(f'{nfuncs=}')
+        # Add to molecule minimal number of functions
+        nfuncs_min_tot += nfunc_per_minimal_atom
+        
+        F_ave = F_atom.copy()
+        if spherically_average_fock:
+            F_ave = spherical_average(F_ave, [shell[1] for shell in smask_atom])
+
+        e_atom, c_atom = eig(F_ave, S_atom.copy())
+
+        def number_of_states(energies, thresh=1e-3):
+            if verbose:
+                print(f'{energies=}')
+            nfuncs_include = nfunc_per_minimal_atom
+            # Handle degeneracies
+            while nfuncs_include < nfuncs \
+              and energies[nfuncs_include]-energies[nfunc_per_minimal_atom-1] < thresh:
+                nfuncs_include += 1
+            return nfuncs_include
+
+
+        if restricted:
+            nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
+            if verbose:
+                print(f'{nocca=}, {noccb=}')
+                print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
+            occs = np.zeros(c_atom.shape[1])
+            occs[:nocca] = 2
+            P_atom = np.abs(
+                c_atom @ np.diag(occs) @ c_atom.conj().T
+            )
+        else:
+            nocca, noccb = number_of_states(e_atom[0]), number_of_states(e_atom[1])
+            if verbose:
+                print(f'Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV')
+                print(f'Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV')
+            occs = np.zeros((2, c_atom.shape[2]))
+            occs[0, :nocca] = 1
+            occs[1, :noccb] = 1
+            P_atom = np.abs(
+                c_atom[0] @ np.diag(occs[0]) @ c_atom[0].conj().T +
+                c_atom[1] @ np.diag(occs[1]) @ c_atom[1].conj().T
+                )
+        Qlim = nocca+noccb
+        if verbose:
+            print(f'{Qlim=}')
+
+        if verbose:
+            with np.printoptions(precision=2, suppress=True):
+                if restricted:
+                    print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
+                    print(f'Occupied state energies [eV]: {e_atom[:nocca]*27.2114}')
+                else:
+                    print(f'Bound alpha state energies [eV]: {e_atom[0, e_atom[0,:]<0]*27.2114}')
+                    print(f'Bound beta  state energies [eV]: {e_atom[1, e_atom[1,:]<0]*27.2114}')
+                    print(f'Occupied alpha state energies [eV]: {e_atom[0, :nocca]*27.2114}')
+                    print(f'Occupied beta  state energies [eV]: {e_atom[1, :noccb]*27.2114}')
+
+        atom_indices = set()
+        Q = 0
+        eps = Q_tol
+        if eps >= Qlim:
+            raise ValueError(f'Tolerance for Q must be smaller than the number of states, {Qlim=}!')
+        # while len(atom_indices) < nfunc_per_minimal_atom:
+        P_atom = np.round(P_atom, 12)
+        while np.abs(Q - Qlim) > eps:
+            # Find largest element of density matrix
+            P_atom_idx = np.unravel_index(np.argmax(P_atom, axis=None),P_atom.shape)
+            # Check whether only 1 index tuple was found (no two equal 
+            # elements in P_atom), otherwise set P_atom_idx to the first
+            # found index tuple
+            if not isinstance(P_atom_idx[0], np.int64):
+                P_atom_idx = P_atom_idx[0]
+            Pat_i, Pat_j = P_atom_idx
+            
+            # Set functions of same shell to True
+            if by_shell:
+                mask_atom[Pat_i] = True
+                mask_atom[Pat_j] = True
+                smask_atom = mask_to_smask(mask_atom, smask_atom, mol.cart)
+                mask_atom = smask_to_mask(smask_atom, mol.cart)
+                _, c_mask = hf.eig(
+                    mask_matrix(F_ave.copy(), mask_atom),
+                    mask_matrix(S_atom.copy(), mask_atom)
+                    )
+                
+                if get_mask_history:
+                    # set Pat_i and Pat_j in the full mask to True in
+                    # the current atom block
+                    full_mask[func_offset + Pat_i] = True
+                    full_mask[func_offset + Pat_j] = True
+                    full_smask = mask_to_smask(full_mask, smask.copy(), mol.cart)
+                    mask_history.append(copy.deepcopy(full_smask))
+
+                # set elements i,j and j,i of P_atom to zero
+                P_atom[mask_atom, :] = 0
+                P_atom[:, mask_atom] = 0
+
+                # add indices where mask is True to atom_indices
+                atom_indices.update(np.where(mask_atom)[0].tolist())
+                Q = get_q_sqrd(
+                    c_atom.copy(), c_mask,
+                    S_atom[:, mask_atom].copy(),
+                    (nocca, noccb),
+                    )
+            else:
+                atom_indices.extend(list(set((Pat_i, Pat_j))))
+                P_atom[Pat_i, Pat_j] = 0
+                P_atom[np.flip((Pat_i, Pat_j))] = 0
+                # fixme: update c_mask and Q
+                raise RuntimeError('not implemented')
+
+        # Mask
+        atom_indices = list(atom_indices)
+        minimal_basis_mask[func_offset + np.asarray(atom_indices)] = True
+
+    assert np.sum(minimal_basis_mask) >= nfuncs_min_tot
+    if get_mask_history:
+        return minimal_basis_mask, mask_history
+    return minimal_basis_mask
+
 
 def find_subspace(
     F:                      np.ndarray,
