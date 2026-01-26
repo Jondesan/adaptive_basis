@@ -273,6 +273,9 @@ if __name__ == "__main__":
 
             convergences = []
 
+            # current_panelidx = panelidx
+            # nocc = 0
+            # nfunc = 0
             for j,df in enumerate(datalist):
                 current_panelidx = panelidx + (3 if 'unc' in df.basis_set else 0)
 
@@ -291,7 +294,7 @@ if __name__ == "__main__":
                 if df.variant == 'elden':
                     y *= -1
                 axs[current_panelidx].semilogy(
-                    x/nfunc, y,
+                    x / nfunc, y,
                     label=( f'{df.init_guess}' + (f', basis: {df.sapbasisname}' if df.init_guess == 'sap' else '') ),
                     c=colors[j], ls=ls[ j % (numpanels-1) ], marker='o', lw=lw
                     )
@@ -361,7 +364,7 @@ if __name__ == "__main__":
             #     label=f'Convergence {conv_tol}: {conv_line_x} funcs')
             minimal_basis_line_x = nocc / 2
             axs[current_panelidx].axvline(
-                minimal_basis_line_x/nfunc,# ymin, ymax,
+                minimal_basis_line_x / nfunc,# ymin, ymax,
                 linestyle='--', color='red',
                 label=f'Minimal basis: {minimal_basis_line_x} funcs',
                 lw=lw)

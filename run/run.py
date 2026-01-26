@@ -10,8 +10,11 @@ from pyscf import scf, gto
 import numpy as np
 import pandas as pd
 import datetime
+import pyscf
 from time import time
 import adbutils
+import re
+import atomic_block_util
 
 AVAIL_INIT_METHODS = [
     'scf',
@@ -373,8 +376,52 @@ def run_abs(
                     f.write("\n\n")
 
 
-def run_atomic_block_decomp_on_molecule_set(
+def print_labels_of_functions_in_mask(mask, mol):
+    atom_dict = atomic_block_util.function_labels_from_mask(mask, mol)
+
+    print('\n\nFunctions in the pseudominimal basis:')
+    for key, elem in atom_dict.items():
+        print(f'{key}: {elem}')
+    print()
+    print()
+
+
+def find_pseudominimal_basis_mask(
         mol,
+        F,
+        S,
+        init_guess   : str  = 'atom',
+        sap_basis    : str  = 'sapgraspsmall',
+        sph_avg_fock : bool = False,
+        run_dft      : bool = False,
+        xcfunc       : str  = 'PBE'
+    ):
+
+    grid_level = 7
+    mf = dft.KS(mol) if run_dft else scf.HF(mol)
+    if run_dft:
+        mf.grids.level = grid_level
+        mf.xc = xcfunc
+        mf.grids.prune = None
+    
+    # Initialize init guess method
+    mf.init_guess = init_guess
+    if init_guess == 'sap':
+        mf.sap_basis = sap_basis
+    dm0 = mf.get_init_guess(key=init_guess)
+    # we need the corresponding Fock matrix
+    F = mf.get_fock(dm=dm0)
+    S = mf.get_ovlp()
+    # Find minimal basis using atomic block decomposition
+    return adb.atomic_block_minimal_basis(
+        mol, F, S, Q_tol=q_tol, by_shell=True,
+        get_mask_history=False, verbose=False,
+        spherically_average_fock=sph_avg_fock,
+    )
+
+
+def run_atomic_block_decomp_on_molecule_set(
+        mols,
         q_tol=1.0,
         output='atomic_block_decomp.output',
         run_dft=False,
@@ -387,16 +434,16 @@ def run_atomic_block_decomp_on_molecule_set(
                 ';spin;charge;nfuncs_abs;e_minimal;e_abs;e_fullscf' + \
                 ';abd_conv;abs_conv;full_conv\n')
         for molfilename, mol, uncmol, shells, init_guesses, basisname in mols:
+            
             for init_guess in init_guesses:
                 if init_guess == 'scf' or \
                    init_guess == 'minao' or \
                    init_guess is None:
                     continue
-                if len(mol._atom) != 2:
-                    continue
+                # if len(mol._atom) != 2:
+                #     continue
                 xcfunc = 'PBE'
                 grid_level = 7
-
                 mf = dft.KS(mol) if run_dft else scf.HF(mol)
                 if run_dft:
                     mf.grids.level = grid_level
@@ -414,28 +461,33 @@ def run_atomic_block_decomp_on_molecule_set(
                     sapbases = [None]
 
                 for sapbs in sapbases:
-                    if init_guess == 'vsap':
-                        continue
-                    else:
-                        mf.sap_basis = sapbs
-                        dm0 = mf.get_init_guess(key=init_guess)
-                    F = mf.get_fock(dm=dm0)
+                    if init_guess != 'vsap':
+                        mf.sap_basis = sap_basis
+                    dm0 = mf.get_init_guess(key=init_guess)
                     # we need the corresponding Fock matrix
                     F = mf.get_fock(dm=dm0)
                     S = mf.get_ovlp()
                     # This gives the initial guess density matrix for the mf object
                     mf.mo_energy, mf.mo_coeff = mf.eig(F, S)
                     mf.mo_occs = mf.get_occ(mf.mo_energy)
-                    
-                    # Find minimal basis using atomic block decomposition
+
                     minimal_basis_mask = adb.atomic_block_minimal_basis(
                         mol, F, S, Q_tol=q_tol, by_shell=True,
                         get_mask_history=False, verbose=False,
-                        spherically_average_fock=spherically_average_fock,
+                        spherically_average_fock=sph_avg_fock,
                     )
+                    
+                    # find_pseudominimal_basis_mask(
+                    #     mf.mol, F, S,
+                    #     init_guess = init_guess,
+                    #     sph_avg_fock = spherically_average_fock,
+                    #     sap_basis = sapbs)
+                    
                     minimal_basis_smask = adb.init_smask(mol, mol.cart)
                     minimal_basis_smask = adb.mask_to_smask(minimal_basis_mask, minimal_basis_smask, mol.cart)
                     minimal_basis_mol = adb.create_subbasis_mol(mol, minimal_basis_smask)
+                    print(f'{minimal_basis_smask=}')
+                    
                     mbmf = dft.KS(minimal_basis_mol) if run_dft else scf.HF(minimal_basis_mol)
                     if run_dft:
                         mbmf.grids.level = grid_level
@@ -446,36 +498,38 @@ def run_atomic_block_decomp_on_molecule_set(
                     abd_conv = mbmf.converged
                     e_minimal_basis = mbmf.e_tot
                     nfunc_minimal = np.sum(minimal_basis_mask)
+                    
+                    print_labels_of_functions_in_mask(minimal_basis_mask, mol)                  
 
-                    abs_smask = adb.find_subspace(F, S, mol, mf, conv_tol=1e-1,
-                                                  get_smask=True,
-                                                  spherical_average=spherically_average_fock,
-                                                  abd_Q_tol=q_tol)
-                    abs_mask = adb.smask_to_mask(abs_smask, cart=mol.cart)
-                    nfunc_abs = np.sum(abs_mask)
-                    subbasis_mol = adb.create_subbasis_mol(mol, abs_smask)
-                    sbmf = dft.KS(subbasis_mol) if run_dft else scf.HF(subbasis_mol)
-                    if run_dft:
-                        sbmf.grids.level = grid_level
-                        sbmf.xc = xcfunc
-                        sbmf.grids.prune = None
-                    sbmf.init_guess = init_guess
-                    sbmf.kernel()
-                    abs_conv = sbmf.converged
-                    e_subbasis = sbmf.e_tot
+                    # abs_smask = adb.find_subspace(F, S, mol, mf, conv_tol=1e-1,
+                    #                               get_smask=True,
+                    #                               spherical_average=spherically_average_fock,
+                    #                               abd_Q_tol=q_tol)
+                    # abs_mask = adb.smask_to_mask(abs_smask, cart=mol.cart)
+                    # nfunc_abs = np.sum(abs_mask)
+                    # subbasis_mol = adb.create_subbasis_mol(mol, abs_smask)
+                    # sbmf = dft.KS(subbasis_mol) if run_dft else scf.HF(subbasis_mol)
+                    # if run_dft:
+                    #     sbmf.grids.level = grid_level
+                    #     sbmf.xc = xcfunc
+                    #     sbmf.grids.prune = None
+                    # sbmf.init_guess = init_guess
+                    # sbmf.kernel()
+                    # abs_conv = sbmf.converged
+                    # e_subbasis = sbmf.e_tot
 
-                    mf.kernel()
-                    full_conv = mf.converged
-                    e_tot = mf.e_tot
+                    # mf.kernel()
+                    # full_conv = mf.converged
+                    # e_tot = mf.e_tot
 
-                    adb.print_shells(mol, minimal_basis_smask)
-                    print(molfilename, init_guess, basisname, nfunc_minimal, \
-                          uncmol.nao_nr(), nfunc_abs, e_minimal_basis, e_subbasis, e_tot)
+                    # adb.print_shells(mol, minimal_basis_smask)
+                    # print(molfilename, init_guess, basisname, nfunc_minimal, \
+                    #       uncmol.nao_nr(), nfunc_abs, e_minimal_basis, e_subbasis, e_tot)
 
-                    f.write(f'{molfilename.split(".")[0]};{init_guess};{basisname};')
-                    f.write(f'{nfunc_minimal};{uncmol.nao_nr()};{q_tol};{mol.spin};{mol.charge};')
-                    f.write(f'{nfunc_abs};{e_minimal_basis:.12f};{e_subbasis:.12f};{e_tot};')
-                    f.write(f'{abd_conv};{abs_conv};{full_conv}\n')
+                    # f.write(f'{molfilename.split(".")[0]};{init_guess};{basisname};')
+                    # f.write(f'{nfunc_minimal};{uncmol.nao_nr()};{q_tol};{mol.spin};{mol.charge};')
+                    # f.write(f'{nfunc_abs};{e_minimal_basis:.12f};{e_subbasis:.12f};{e_tot};')
+                    # f.write(f'{abd_conv};{abs_conv};{full_conv}\n')
 
 
 def run_occupations(
@@ -666,7 +720,6 @@ if __name__ == "__main__":
 
     for mol in mols:
         mol[4] = add_initial_guesses(init_guesses, mol[4])
-    
     
     match run_mode:
         case 'abs':
