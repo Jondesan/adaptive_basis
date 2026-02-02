@@ -22,6 +22,7 @@ import copy
 import sys
 import re
 
+
 VARIANTS = [
     'enocc', # Energy sum of occupied orbitals
     'elden', # Electron density
@@ -526,7 +527,7 @@ def functions_per_shell(mol):
             An array whose elements correspond to the number of functions
             on the corresponding shell.
     """
-
+    raise NotImplementedError("This function has not been implemented yet.")
     def funcs_on_shell(angl, cart=False):
         return (angl + 1) * (angl + 2) / 2 if cart else 2 * angl + 1
 
@@ -547,8 +548,10 @@ def link_shells(mol, mask):
             The function mask
     """
 
-    smask = init_smask(mol, mol.cart)
-    smask = mask_to_smask(mask, smask, mol.cart)
+    smask = mask_to_smask(
+        mask,
+        init_smask(mol, mol.cart),
+        mol.cart)
 
     return smask_to_mask(smask, mol.cart)
 
@@ -1330,7 +1333,6 @@ def find_subspace(
             F,
             S,
             Q_tol=abd_Q_tol,
-            link_shells=link_shells,
             spherically_average_fock=spherical_average,
             verbose=verbose)
         mask_init_idx = np.where(mask)[0]

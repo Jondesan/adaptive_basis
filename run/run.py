@@ -631,7 +631,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--abd",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help="Initialize with atomic block decomposition, optional. Default is True.",
     )
     parser.add_argument(
