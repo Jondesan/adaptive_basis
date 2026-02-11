@@ -359,11 +359,16 @@ def run_abs(
                     # if variant == 'enocc':
                     #     df_fbyf = pd.DataFrame(data_fbyf, columns=datacols)
                     df_sbys = pd.DataFrame(data_sbys, columns=datacols)
-
-                    f.write("{:<15s} {:<30s} {:<15s}\n".format("N_occ", "E_HF", "nfunc"))
+                    minimal_mol = pyscf.M(
+                        atom = mol.atom,
+                        basis = 'sto3g',
+                        charge = mol.charge,
+                        spin = mol.spin
+                    )
+                    f.write("{:<15s} {:<30s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc", "nfunc_minimal"))
                     f.write(
-                        "{:<15d} {:<30.20f} {:<15d}\n\n".format(
-                            np.sum(mol.nelec), e_tot, mol.nao_nr()
+                        "{:<15d} {:<30.20f} {:<15d} {:<15d}\n\n".format(
+                            np.sum(mol.nelec), e_tot, mol.nao_nr(), minimal_mol.nao_nr()
                         )
                     )
 
