@@ -174,6 +174,7 @@ def run_abs(
     calculate_DB_correction = True
     if calculate_DB_correction:
         datacols.extend(['dE', 'E_HF_largebasis'])
+    datacols.extend(['conv_stat'])
 
     for molfilename, mol, shellsep_mol, shells, init_guess, basisname in mol_list:
         # Open the output file

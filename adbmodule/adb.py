@@ -1768,6 +1768,7 @@ def mask_analysis(
                 # print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
                 pass
             submf.kernel(dump_chk=False)
+            subbasis_converged = submf.converged
             scf_energy = submf.e_tot
  
             if is_restricted:
@@ -1840,6 +1841,7 @@ def mask_analysis(
                 copy.deepcopy(smask if is_smask else mask),
                 dE,
                 E_HF_largebasis,
+                subbasis_converged,
             ])
         last_mask = copy.deepcopy(mask)
         if is_smask:
