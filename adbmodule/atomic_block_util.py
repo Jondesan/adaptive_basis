@@ -296,7 +296,7 @@ class BlockDecomposedMol:
 
         string_rep += "\n"
         string_rep += "The SCF calculation object has "
-        string_rep += f"{"" if self.scf_initialized else "not "}been initialized!\n"
+        string_rep += f"{'' if self.scf_initialized else 'not '}been initialized!\n"
 
         return string_rep
 
