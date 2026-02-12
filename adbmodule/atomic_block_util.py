@@ -430,9 +430,9 @@ def find_projected_minimal_basis_mask(
     # Find the AO-id offsets of the atoms
     atom_offsets = pyscf.gto.mole.aoslice_by_atom(mol)[:,2]
 
-    # Generate arrays with the angular
-    # momentum l and atom-id for all functions.
-    # Element n corresponds the l and atom-id of the n:th basis function
+    # Generate arrays with the angular momentum l and atom-id
+    # for all functions. Element n corresponds the l and atom-id
+    # of the n:th basis function
     sto3g_angls = get_array_of_angular_momenta_and_atom_id(mol_sto3g)
     sto3g_aid = sto3g_angls[:, 1]
     sto3g_angls = sto3g_angls[:, 0]
@@ -453,21 +453,21 @@ def find_projected_minimal_basis_mask(
         if prev_angl != angl or prev_angl is None or prev_aid != atom_id or prev_aid is None:
             prev_aid = atom_id
             prev_angl = angl
-            shell_mask = np.ones(nfunc_angl, dtype=bool)
 
         # Count the offset of the current shell
         shell_offset = atom_offsets[atom_id] + len(list(filter(
             lambda x: x[0] == atom_id and x[1] < angl, mol._bas)))
 
-        idx = np.argmax(ovlp_col[shell_offset:shell_offset + nfunc_angl][shell_mask])
+        # This guarantees no function will be chosen twice by removing already
+        # selected functions from the pool of available ones
+        ovlp_col[mask] = 0.0
 
-        # Turn of the chosen function in the mask to prevent
-        # choosing the same function again if more functions of the
-        # same angular momentum are still required
-        shell_mask[idx] = 0
+        idx = np.argmax(ovlp_col[shell_offset:shell_offset + nfunc_angl])
         mask[shell_offset + idx] = 1
 
     mask = adb.link_shells(mol, mask)
+    if np.sum(mask) != mol_sto3g.nao_nr():
+        raise RuntimeError(f"Number of functions in the projected minimal basis [{np.sum(mask)}] does not match the number of functions in the actual minimal basis [{mol_sto3g.nao_nr()}]!")
 
     return mask
 
