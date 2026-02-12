@@ -1338,9 +1338,7 @@ def find_subspace(
             verbose=verbose)
         mask_init_idx = np.where(mask)[0]
     elif initialize_by_projection:
-        # raise NotImplementedError("Initialize by projection has not been implemented yet.")
         mask = atomic_block_util.find_projected_minimal_basis_mask(mol)
-
         mask_init_idx = np.where(mask)[0]
     else:
         mask_init_idx = [np.argmin(Fii)]
@@ -1396,7 +1394,6 @@ def find_subspace(
                 0.0,
                 'Max element of Fock matrix'))
 
-    print(f'{previous_sum=}')
     while True and not np.all(mask):
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
