@@ -539,7 +539,8 @@ def functions_per_shell(mol):
 
 
 def link_shells(mol, mask):
-    """Toggle functions corresponding to same atoms on and toggle all functions within a shell.
+    """Toggle functions corresponding to same atoms on and toggle all
+    functions within a shell.
 
     Args:
         mol : pyscf.got.MoleBase
@@ -1351,7 +1352,7 @@ def find_subspace(
     if get_smask:
         smask = init_smask(fullbasis_mol, fullbasis_mol.cart)
         smask = mask_to_smask(mask, smask, fullbasis_mol.cart)
-        if link_shells:
+        if link_shells and not initialize_by_projection:
             # If link_shells true, set same shells of same atoms to True
             smask = set_linked_shells(smask, True)
             # if verbose:
@@ -1364,13 +1365,15 @@ def find_subspace(
         sub_hcore = scf_obj_copy.hf.get_hcore(mol)[mask_init_idx, mask_init_idx]
     elif variant == 'elden':
         _, Cfull = eig(F, S)
-        _, Csub = eig(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
+    e_sub, Csub = eig(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
     previous_sum = get_iteration_criteria_value(
-        variant, epsilon_i=Fii, nocc=nocc, sub_hcore=sub_hcore,
+        variant, epsilon_i=e_sub, nocc=nocc, sub_hcore=sub_hcore,
         Csub=Csub, Cfull=Cfull, ovlp=S[:, mask])
+    
+    basis_initialized = False
     if return_mask_history:
+        mask_history = []
         if abd_initialization:
-            mask_history = []
             for mb_mask in minimal_basis_history:
                 mask_history.append(
                     (mb_mask,
@@ -1378,15 +1381,22 @@ def find_subspace(
                     0.0,
                     'Atomic Block Decomposition')
                 )
-        else:
-            mask_history = [(
+            basis_initialized = True
+        elif initialize_by_projection:
+            mask_history.append((
                 copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
                 previous_sum,
                 0.0,
-                'Max element of Fock matrix')]
+                'Minimal basis projection'))
+            basis_initialized = True
+        else:
+            mask_history.append((
+                copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                previous_sum,
+                0.0,
+                'Max element of Fock matrix'))
 
-    subbasis_mol = create_shell_separated_mol(fullbasis_mol)
-    basis_initialized = False
+    print(f'{previous_sum=}')
     while True and not np.all(mask):
         mask, difference, current_criteria_val, smask = expand_mask(
             F, S, nocc, mask,
@@ -1408,8 +1418,6 @@ def find_subspace(
                     0.0,
                     0.0,
                     'Max element of Fock matrix') )
-
-        subbasis_mol = create_shell_separated_mol(fullbasis_mol)
 
         previous_sum = current_criteria_val
 
@@ -1662,6 +1670,7 @@ def mask_analysis(
     # Filter mask_history of initialization and ABS
     mask_history_init = list(filter(lambda x: len(x)>=4, mask_history))
     mask_history = list(filter(lambda x: len(x)<=3, mask_history))
+    mask_history.insert(0, mask_history_init[-1][:3])
 
     if verbose:
         init_method = mask_history_init[0][3]
@@ -1684,6 +1693,12 @@ def mask_analysis(
             print(f'{label},  ', end='')
             if i % 10 == 0: print()
             i += 1
+        if is_smask:
+            minimal_mask = smask_to_mask(mask_history_init[-1][0], mol.cart)
+        else:
+            minimal_mask = mask_history_init[-1][0]
+        print(np.sum(minimal_mask))
+        print(atomic_block_util.function_labels_from_mask(minimal_mask, mol))
         
         print('\nNumber of toggled functions:', np.sum(last_mask))
         print(20*'#' + ' INITIALIZATION END ' + 61*'#')
@@ -1818,15 +1833,21 @@ def mask_analysis(
         if verbose:
             if is_smask:
                 changes = [i for i in range(len(smask)) if smask[i][0] != last_smask[i][0]]
-                label = get_atom_shell_label(mol, changes[0], link_shells=link_shells*initialized)
-                if link_shells:
-                    label = ' '.join(label.split(' ')[1:])
-                    label = '*'+label
+                if len(changes) == 0:
+                    label = "Init"
+                else:
+                    label = get_atom_shell_label(mol, changes[0], link_shells=link_shells*initialized)
+                    if link_shells:
+                        label = ' '.join(label.split(' ')[1:])
+                        label = '*' + label
             else:
                 changes = [i for i in range(len(mask)) if mask[i] != last_mask[i]]
-                aolabels = fullbasis_mol.ao_labels()
-                aolabels = [aolabels[i] for i in changes]
-                label = ' '.join(aolabels)
+                if len(changes) == 0:
+                    label = "Init"
+                else:
+                    aolabels = fullbasis_mol.ao_labels()
+                    aolabels = [aolabels[i] for i in changes]
+                    label = ' '.join(aolabels)
             print_data(
                 mask, current_val, difference, label, scf_energy, Q_sqrd,
                 print_header=False
