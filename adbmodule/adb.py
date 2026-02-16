@@ -1749,7 +1749,7 @@ def mask_analysis(
                 ecp = ecp_bas, symmetry = irrep_symb
                 )
             subbasis_mol.build()
-            submf = scf.HF(subbasis_mol)
+            submf = scf.HF(subbasis_mol).newton()
             
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedF = mask_matrix(fock, mask, is_restricted)
@@ -1779,7 +1779,7 @@ def mask_analysis(
             else:
                 # print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
                 pass
-            submf.kernel(dump_chk=False)
+            submf.kernel()#dump_chk=False)
             subbasis_converged = submf.converged
             scf_energy = submf.e_tot
  
