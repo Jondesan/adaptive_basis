@@ -215,9 +215,9 @@ def run_abs(
         
         # Set up Hartree-Fock, remove linear dependencies from basis
         if is_restricted:
-            myhf = mol.RHF()
+            myhf = mol.RHF().newton()
         else:
-            myhf = mol.UHF()#.apply(scf.addons.remove_linear_dep_)
+            myhf = mol.UHF().newton()#.apply(scf.addons.remove_linear_dep_)
         myhf = myhf.apply(scf.addons.remove_linear_dep_)
         if dft:
             myhf = myhf.to_ks()
