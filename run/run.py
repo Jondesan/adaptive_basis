@@ -142,7 +142,8 @@ def run_abs(
     abd_init=True,
     use_psi4=True,
     symmetry_occ_fname=None,
-    q_tol=1.0
+    q_tol=1.0,
+    ODIR="output"
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -267,7 +268,7 @@ def run_abs(
                     fname = ".".join([molname, f'charge{charge}', f'spin{spin}', bsname, ig])
                 if not lshells:
                     fname = ".".join([fname, 'unlinked'])
-                with open(f'output/{fname}.out', "w") as f:
+                with open(f'{ODIR}/{fname}.out', "w") as f:
                     f.write("{:<15s} {:<15s} {:<15s} {:<15s} {:<15s}".format(
                         "molecule", "basis_set", "variant", "init_guess", "link_status"))
                     if ig == 'sap':
@@ -673,6 +674,12 @@ if __name__ == "__main__":
         default=True,
         help="Spherically average the Fock matrix when running atomic block decomposition, optional. Default is True.",
     )
+    parser.add_argument(
+        "--output_dir",
+        type=str,
+        default='output',
+        help="Ouput directory path for 'abs' run mode. Default 'output'"
+    )
 
     args = parser.parse_args()
 
@@ -695,6 +702,7 @@ if __name__ == "__main__":
     run_mode = args.run_mode
     output_file_name = args.output_file_name
     sph_avg_fock = args.sph_avg_fock
+    odir = args.output_dir
     bs = []
     bstemp = []
 
@@ -739,7 +747,8 @@ if __name__ == "__main__":
                 dft=dft, abd_init=abd_init,
                 use_psi4=use_psi4,
                 symmetry_occ_fname=sym_occ_file,
-                q_tol=q_tol
+                q_tol=q_tol,
+                ODIR=odir,
                 )
         case 'occs':
             run_occupations(
