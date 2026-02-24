@@ -421,7 +421,9 @@ def find_projected_minimal_basis_mask(
         basis = 'sto3g',
         spin = mol.spin,
         charge = mol.charge,
-        cart = mol.cart
+        cart = mol.cart,
+        unit = mol.unit,
+        symmetry = mol.symmetry,
     )
     mask = np.zeros(mol.nao_nr(), dtype=bool)    
     s21 = pyscf.gto.mole.intor_cross(
@@ -440,6 +442,8 @@ def find_projected_minimal_basis_mask(
     prev_angl = None
     prev_aid = None
     shell_offset = 0
+
+    ao_labels = mol.ao_labels()
     for (ovlp_col, angl, atom_id) in zip(s21.T, sto3g_angls, sto3g_aid):
         # Count functions of angular momentum angl in large basis
         # for the current atom
@@ -455,9 +459,11 @@ def find_projected_minimal_basis_mask(
             prev_angl = angl
 
         # Count the offset of the current shell
-        shell_offset = atom_offsets[atom_id] + len(list(filter(
-            lambda x: x[0] == atom_id and x[1] < angl, mol._bas)))
-
+        shell_offset = atom_offsets[atom_id]
+        # Make sure to multiply by the number of allowed magnetic quant. nums
+        angls_atom = [x[1] for x in list(filter(lambda x: x[0] == atom_id and x[1] < angl, mol._bas))]
+        shell_offset += sum([funcs_on_shell(angll) for angll in angls_atom])
+        
         # This guarantees no function will be chosen twice by removing already
         # selected functions from the pool of available ones
         ovlp_col[mask] = 0.0
