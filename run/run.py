@@ -42,8 +42,9 @@ def get_molecules_in_dir(
     molpath: str,
     basis_sets: list,
     get_decontractions: bool = False,
-    unit='Angstrom',
-    symmetry_fname=None
+    unit = 'Angstrom',
+    symmetry = False,
+    symmetry_fname = None
 ):
     """Get molecule xyz files from molpath, can be directory or single file.
     """
@@ -66,7 +67,7 @@ def get_molecules_in_dir(
             irrep_occs, symm = adbutils.read_symmetry_occs_from_file(
                 symmetry_fname, molfname=molfname)
         else:
-            symm=True
+            symm = symmetry
 
         for bs in basis_sets:
             for unc in (
@@ -216,7 +217,9 @@ def run_abs(
         
         # Set up Hartree-Fock, remove linear dependencies from basis
         if is_restricted:
+            print(f'{mol.symmetry=}')
             myhf = mol.RHF().newton()
+            print(f'{myhf=}')
         else:
             myhf = mol.UHF().newton()#.apply(scf.addons.remove_linear_dep_)
         myhf = myhf.apply(scf.addons.remove_linear_dep_)
@@ -247,6 +250,10 @@ def run_abs(
         e_tot = myhf.e_tot
         fullbasis_hf_time = end - start
         F_scf = myhf.get_fock()
+        if mol.symmetry:
+            irrep_nelec = myhf.get_irrep_nelec()
+        else:
+            irrep_nelec = None
 
         # Save the SCF matrices
         mo_coeff_scf = copy.deepcopy(myhf.mo_coeff)
@@ -338,12 +345,12 @@ def run_abs(
                     )
                     data_sbys = adb.mask_analysis(
                         smaskhistory, shellsep_mol, myhf,
-                        #F_scf, S, dft=dft, xc=xc, grid_level=grid_level,
-                        F, S, dft=dft, xc=xc, grid_level=grid_level,
-                        use_psi4=use_psi4, molfname=molfilename,
-                        sym_occ_fname=symmetry_occ_fname,
-                        C_full=mo_coeff_scf,
-                        calculate_correction=calculate_DB_correction
+                        F, S, dft = dft, xc = xc, grid_level = grid_level,
+                        use_psi4 = use_psi4, molfname = molfilename,
+                        sym_occ_fname = symmetry_occ_fname,
+                        C_full = mo_coeff_scf,
+                        calculate_correction = calculate_DB_correction,
+                        irrep_nelec = irrep_nelec
                     )
                     end = time()
 
@@ -364,7 +371,8 @@ def run_abs(
                         atom = mol.atom,
                         basis = 'sto3g',
                         charge = mol.charge,
-                        spin = mol.spin
+                        spin = mol.spin,
+                        unit = mol.unit
                     )
                     f.write("{:<15s} {:<30s} {:<15s} {:<15s}\n".format("N_occ", "E_HF", "nfunc", "nfunc_minimal"))
                     f.write(
@@ -675,6 +683,12 @@ if __name__ == "__main__":
         help="Spherically average the Fock matrix when running atomic block decomposition, optional. Default is True.",
     )
     parser.add_argument(
+        "--symmetry",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Whether symmetry adapted orbitals are used, optional. Default is False.",
+    )
+    parser.add_argument(
         "--output_dir",
         type=str,
         default='output',
@@ -702,6 +716,7 @@ if __name__ == "__main__":
     run_mode = args.run_mode
     output_file_name = args.output_file_name
     sph_avg_fock = args.sph_avg_fock
+    symm = args.symmetry
     odir = args.output_dir
     bs = []
     bstemp = []
@@ -726,8 +741,9 @@ if __name__ == "__main__":
             RuntimeError(f'Path {sym_occ_file} is not a valid file.')
     
     mols = get_molecules_in_dir(
-        molpath, bs, get_decontractions=dec, unit=unit,
-        symmetry_fname=sym_occ_file)
+        molpath, bs, get_decontractions = dec, unit = unit,
+        symmetry = symm,
+        symmetry_fname = sym_occ_file )
 
     if 'all' in init_guesses:
         init_guesses = AVAIL_INIT_METHODS
@@ -739,16 +755,16 @@ if __name__ == "__main__":
         case 'abs':
             run_abs(
                 mols,
-                variant=variant,
-                lshells=lshells,
-                conv_tol=conv_tol,
-                sap_basis_sets=sapbasis,
-                nfunc_normalisation=nfunc_norm,
-                dft=dft, abd_init=abd_init,
-                use_psi4=use_psi4,
-                symmetry_occ_fname=sym_occ_file,
-                q_tol=q_tol,
-                ODIR=odir,
+                variant = variant,
+                lshells = lshells,
+                conv_tol = conv_tol,
+                sap_basis_sets = sapbasis,
+                nfunc_normalisation = nfunc_norm,
+                dft = dft, abd_init = abd_init,
+                use_psi4 = use_psi4,
+                symmetry_occ_fname = sym_occ_file,
+                q_tol = q_tol,
+                ODIR = odir,
                 )
         case 'occs':
             run_occupations(
