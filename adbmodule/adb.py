@@ -1599,6 +1599,7 @@ def mask_analysis(
     use_psi4:               bool                = False,
     C_full:                 np.ndarray | None   = None,
     calculate_correction:   bool                = False,
+    irrep_nelec:            dict | None         = None,
     ) -> list:
     """Run mask analysis.
 
