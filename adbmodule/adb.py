@@ -11,7 +11,7 @@ from pyscf.data.elements import _std_symbol, ELEMENTS
 from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
 from pyscf.scf import *
-from pyscf.scf.hf import eig
+# from pyscf.scf.hf import eig
 from pyscf.scf.addons import canonical_orth_, project_dm_nr2nr
 from pyscf import lib, gto, scf
 from warnings import warn
@@ -61,7 +61,7 @@ def dual_basis_energy_correction(
     return np.trace(dP @ F_full), scf_obj.e_tot
 
 
-def eigh(
+def eig(
         h: np.ndarray,
         s: np.ndarray
         ) -> tuple[np.ndarray, np.ndarray]:
@@ -641,6 +641,7 @@ def get_sub_scf_attributes(
 def create_subbasis_mol(
         mol:        gto.MoleBase,
         smask:      np.ndarray    ) -> gto.MoleBase:
+
     extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(mol))
     subbasis_mol = gto.Mole(
         atom = mol.atom, basis = extracted_basis,
@@ -1364,6 +1365,7 @@ def find_subspace(
     elif variant == 'elden':
         _, Cfull = eig(F, S)
     e_sub, Csub = eig(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
+
     previous_sum = get_iteration_criteria_value(
         variant, epsilon_i=e_sub, nocc=nocc, sub_hcore=sub_hcore,
         Csub=Csub, Cfull=Cfull, ovlp=S[:, mask])
