@@ -57,8 +57,12 @@ def dual_basis_energy_correction(
         mo_coeff = C_new,
         mo_occ = scf_obj.get_occ(mo_energy = E_new, mo_coeff = C_new))
     dP = P_new - P_full_projected
-    
-    return np.trace(dP @ F_full), scf_obj.e_tot
+    # If unrestricted calculation
+    if len(dP.shape) > 2:
+        dE = (np.trace(dP[0] @ F_full[0]) + np.trace(dP[1] @ F_full[1])) / 2
+    else:
+        dE = np.trace(dP @ F_full)
+    return dE, scf_obj.e_tot
 
 
 def eig(
