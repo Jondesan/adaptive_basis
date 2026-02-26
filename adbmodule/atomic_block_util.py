@@ -415,16 +415,27 @@ def get_array_of_angular_momenta_and_atom_id(mol):
 def find_projected_minimal_basis_mask(
         mol,
     ):
-    
-    mol_sto3g = pyscf.M(
-        atom = mol.atom,
-        basis = 'sto3g',
-        spin = mol.spin,
-        charge = mol.charge,
-        cart = mol.cart,
-        unit = mol.unit,
-        symmetry = mol.symmetry,
-    )
+    try:
+        mol_sto3g = pyscf.M(
+            atom = mol.atom,
+            basis = 'sto3g',
+            ecp = mol.ecp,
+            spin = mol.spin,
+            charge = mol.charge,
+            cart = mol.cart,
+            unit = mol.unit,
+            symmetry = mol.symmetry,
+        )
+    except:
+        mol_sto3g = pyscf.M(
+            atom = mol.atom,
+            basis = 'sto3g',
+            spin = mol.spin,
+            charge = mol.charge,
+            cart = mol.cart,
+            unit = mol.unit,
+            symmetry = mol.symmetry,
+        )
     mask = np.zeros(mol.nao_nr(), dtype=bool)    
     s21 = pyscf.gto.mole.intor_cross(
         'int1e_ovlp', mol, mol_sto3g)
