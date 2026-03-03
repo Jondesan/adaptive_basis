@@ -250,10 +250,11 @@ def run_abs(
         e_tot = myhf.e_tot
         fullbasis_hf_time = end - start
         F_scf = myhf.get_fock()
-        if mol.symmetry:
-            irrep_nelec = myhf.get_irrep_nelec()
-        else:
+
+        if not mol.symmetry or mol.groupname == 'C1':
             irrep_nelec = None
+        else:
+            irrep_nelec = myhf.get_irrep_nelec()
 
         # Save the SCF matrices
         mo_coeff_scf = copy.deepcopy(myhf.mo_coeff)
