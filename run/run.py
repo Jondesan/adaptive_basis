@@ -38,12 +38,28 @@ def get_files_in_folder(folder: str):
     return files
 
 
+def point_group_from_file(path, mol_filename):
+    """ Looks through file at 'path' for the point group label of a molecule
+    with filename 'mol_filename'. If not found, return True.
+    """
+    pnt_grp = True
+    print(f'Reading file with point group information at path {path}')
+    print(f'Searching for point group match for molecule with filename {mol_filename}')
+    with open(path, 'r') as file:
+        for line in file:
+            name, point_grp_label = line.split()
+            if mol_filename == name:
+                pnt_grp = point_grp_label
+                print(f'Found point group {pnt_grp} for molecule with filename {mol_filename}')
+    
+    return pnt_grp
+
 def get_molecules_in_dir(
     molpath: str,
     basis_sets: list,
     get_decontractions: bool = False,
     unit = 'Angstrom',
-    symmetry = False,
+    symmetry: bool | str = False,
     symmetry_fname = None
 ):
     """Get molecule xyz files from molpath, can be directory or single file.
@@ -64,8 +80,7 @@ def get_molecules_in_dir(
         print(f"reading file {fn}")
 
         if symmetry_fname is not None:
-            irrep_occs, symm = adbutils.read_symmetry_occs_from_file(
-                symmetry_fname, molfname=molfname)
+            symm = point_group_from_file(symmetry_fname, molfname)
         else:
             symm = symmetry
 
@@ -108,6 +123,7 @@ def get_molecules_in_dir(
                 #     mol.irrep_name = list(irrep_occs.keys())
                 mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
                 smask = adb.init_smask(mol)
+                print(f'Created molecule {molfname}, with charge {charge}, spin {spin} and symmetry set at {symm}')
                 molecules.append(
                     [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None, bs]
                 )
@@ -217,11 +233,9 @@ def run_abs(
         
         # Set up Hartree-Fock, remove linear dependencies from basis
         if is_restricted:
-            print(f'{mol.symmetry=}')
             myhf = mol.RHF().newton()
-            print(f'{myhf=}')
         else:
-            myhf = mol.UHF().newton()#.apply(scf.addons.remove_linear_dep_)
+            myhf = mol.UHF().newton()
         myhf = myhf.apply(scf.addons.remove_linear_dep_)
         if dft:
             myhf = myhf.to_ks()
@@ -245,9 +259,12 @@ def run_abs(
                 + ' This may cause convergence issues.',
                 file=sys.stderr)
 
+        myhf.init_guess = 'atom'
         myhf.kernel()
+        
         end = time()
         e_tot = myhf.e_tot
+
         fullbasis_hf_time = end - start
         F_scf = myhf.get_fock()
 
@@ -665,6 +682,10 @@ if __name__ == "__main__":
         help="path to file with required symmetry occupations."
     )
     parser.add_argument(
+        "--point_group_file", type=str, required=False, default=None,
+        help="path to file with point group labels."
+    )
+    parser.add_argument(
         "--run_mode",
         type=str,
         default='abs',
@@ -714,6 +735,7 @@ if __name__ == "__main__":
     use_psi4 = args.use_psi4
     q_tol = args.q_tol
     sym_occ_file = args.sym_occ_file
+    pnt_grp_file = args.point_group_file
     run_mode = args.run_mode
     output_file_name = args.output_file_name
     sph_avg_fock = args.sph_avg_fock
@@ -741,10 +763,14 @@ if __name__ == "__main__":
         if not os.path.isfile(sym_occ_file):
             RuntimeError(f'Path {sym_occ_file} is not a valid file.')
     
+    if pnt_grp_file is not None:
+        if not os.path.isfile(pnt_grp_file):
+            RuntimeError(f'Path {pnt_grp_file} is not a valid file.')
+    
     mols = get_molecules_in_dir(
         molpath, bs, get_decontractions = dec, unit = unit,
         symmetry = symm,
-        symmetry_fname = sym_occ_file )
+        symmetry_fname = pnt_grp_file )
 
     if 'all' in init_guesses:
         init_guesses = AVAIL_INIT_METHODS
