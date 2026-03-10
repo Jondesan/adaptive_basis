@@ -462,7 +462,7 @@ def get_iteration_criteria_value(
             else:
                 criteria  = np.sum(epsilon_i[0,:nocc[0]])
                 criteria += np.sum(epsilon_i[1,:nocc[1]]) 
-            return float(criteria)
+            return float(np.real(criteria))
         case 'elden':
             return get_q_sqrd(Cfull, Csub, ovlp, nocc)
 
@@ -1739,9 +1739,7 @@ def mask_analysis(
     elif molfname is not None:
         irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file(sym_occ_fname, molfname=molfname)
         if irrep_nelec is None:
-            irrep_symb = True
-    else:
-        irrep_symb = True        
+            irrep_symb = fullbasis_mol.symmetry#True
 
     for mask_i, current_val, difference, *init in mask_history:
         dE = 0.0
@@ -1775,18 +1773,16 @@ def mask_analysis(
             # SCF initial guess
             subbasis_energies, submf.mo_coeff = eig(maskedF, maskedS)
             submf.mo_occs = submf.get_occ(subbasis_energies)
-            # Set the symmetry occupations if present
+
+            # Set the symmetry adapted occupations if present
             if irrep_nelec is not None:
-                submf.irrep_nelec = {}
-                for key in irrep_nelec:
-                    if irrep_nelec[key] != 0:
-                        if key not in submf.mol.irrep_name:
-                            raise RuntimeError(f'irrep {key} not found in subbasis')
-                        submf.irrep_nelec[key] = irrep_nelec[key]
+                submf.irrep_nelec = irrep_nelec
+            elif not mol.symmetry or mol.groupname == 'C1':
+                submf.irrep_nelec = None
             else:
-                # print('Symmetry occupations not set explicitly! This may cause convergence issues.', file=sys.stderr)
-                pass
-            submf.kernel()#dump_chk=False)
+                submf.irrep_nelec = scf_obj_copy.get_irrep_nelec()
+
+            submf.kernel()
             subbasis_converged = submf.converged
             scf_energy = submf.e_tot
  
