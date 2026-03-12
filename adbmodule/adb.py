@@ -1657,6 +1657,7 @@ def mask_analysis(
             full basis wave function will on every iteration.
     """
     scf_obj_copy = scf_obj.copy()
+    original_irre_nelec = scf_obj_copy.get_irrep_nelec()
     fullbasis_mol = create_shell_separated_mol(mol)
     is_restricted = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
@@ -1754,7 +1755,7 @@ def mask_analysis(
                 ecp = ecp_bas, symmetry = irrep_symb
                 )
             subbasis_mol.build()
-            submf = scf.HF(subbasis_mol).newton()
+            submf = scf.HF(subbasis_mol)#.newton()
             
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedF = mask_matrix(fock, mask, is_restricted)
@@ -1781,8 +1782,19 @@ def mask_analysis(
                 submf.irrep_nelec = None
             else:
                 submf.irrep_nelec = scf_obj_copy.get_irrep_nelec()
-
+                # Remove any irreps that are not present in mol
+                irrep_list = copy.deepcopy(submf.irrep_nelec)
+                for irname in submf.irrep_nelec:
+                    if irname not in subbasis_mol.irrep_name:
+                        assert submf.irrep_nelec[irname] == (0, 0)
+                        del irrep_list[irname]
+                submf.irrep_nelec = irrep_list
+            
             submf.kernel()
+            # Double check that occupations of the irreps have not changed
+            if not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
+                raise RuntimeError(f'The irrep occupations have changed from the ones dictated by the full basis solution.\nOriginal: {original_irre_nelec}\nThis cycle: {submf.get_irrep_nelec()}')
+            
             subbasis_converged = submf.converged
             scf_energy = submf.e_tot
  
