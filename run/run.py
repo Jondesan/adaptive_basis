@@ -261,6 +261,7 @@ def run_abs(
 
         myhf.init_guess = 'atom'
         myhf.kernel()
+        myhf.stability()
         
         end = time()
         e_tot = myhf.e_tot
