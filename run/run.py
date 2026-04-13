@@ -154,13 +154,14 @@ def run_abs(
     sap_basis_sets='sapgraspsmall',
     nfunc_normalisation=True,
     dft=False,
-    xc='b3lyp',
+    xc='pbe',
     grid_level=7,
     abd_init=True,
     use_psi4=True,
     symmetry_occ_fname=None,
     q_tol=1.0,
-    ODIR="output"
+    ODIR="output",
+    debug=False,
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -236,12 +237,15 @@ def run_abs(
             myhf = mol.RHF().newton()
         else:
             myhf = mol.UHF().newton()
-        myhf = myhf.apply(scf.addons.remove_linear_dep_)
         if dft:
-            myhf = myhf.to_ks()
+            if is_restricted:
+                myhf = mol.RKS().newton()
+            else:
+                myhf = mol.UKS().newton()
             myhf.xc = xc
             myhf.grids.level = grid_level
             myhf.grids.prune = None
+        myhf = myhf.apply(scf.addons.remove_linear_dep_)
         # myhf.eig = adb.eigh
 
 
@@ -255,13 +259,13 @@ def run_abs(
                         raise RuntimeError(f'irrep {key} not found in subbasis:\n{myhf.mol.irrep_name}')
                     myhf.irrep_nelec[key] = irrep_nelec[key]
         else:
-            print('Symmetry occupations not set explicitly!' \
-                + ' This may cause convergence issues.',
-                file=sys.stderr)
+            print('Symmetry occupations not set explicitly for the full basis calculation!', file=sys.stderr)
+
+        if debug: myhf.verbose = 4
 
         myhf.init_guess = 'atom'
         myhf.kernel()
-        myhf.stability()
+        # myhf.stability()
         
         end = time()
         e_tot = myhf.e_tot
@@ -369,7 +373,8 @@ def run_abs(
                         sym_occ_fname = symmetry_occ_fname,
                         C_full = mo_coeff_scf,
                         calculate_correction = calculate_DB_correction,
-                        irrep_nelec = irrep_nelec
+                        irrep_nelec = irrep_nelec,
+                        debug = debug,
                     )
                     end = time()
 
@@ -717,6 +722,12 @@ if __name__ == "__main__":
         default='output',
         help="Ouput directory path for 'abs' run mode. Default 'output'"
     )
+    parser.add_argument(
+        "--debug",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Turn on debugging. Default is False.",
+    )
 
     args = parser.parse_args()
 
@@ -742,6 +753,7 @@ if __name__ == "__main__":
     sph_avg_fock = args.sph_avg_fock
     symm = args.symmetry
     odir = args.output_dir
+    debug = args.debug
     bs = []
     bstemp = []
 
@@ -793,6 +805,7 @@ if __name__ == "__main__":
                 symmetry_occ_fname = sym_occ_file,
                 q_tol = q_tol,
                 ODIR = odir,
+                debug = debug,
                 )
         case 'occs':
             run_occupations(
