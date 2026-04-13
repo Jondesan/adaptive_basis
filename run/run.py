@@ -154,7 +154,7 @@ def run_abs(
     sap_basis_sets='sapgraspsmall',
     nfunc_normalisation=True,
     dft=False,
-    xc='pbe',
+    xc='pbe,pbe',
     grid_level=7,
     abd_init=True,
     use_psi4=True,
