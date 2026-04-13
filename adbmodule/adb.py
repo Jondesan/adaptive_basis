@@ -1606,6 +1606,7 @@ def mask_analysis(
     C_full:                 np.ndarray | None   = None,
     calculate_correction:   bool                = False,
     irrep_nelec:            dict | None         = None,
+    debug:                  bool                = False,
     ) -> list:
     """Run mask analysis.
 
@@ -1657,7 +1658,8 @@ def mask_analysis(
             full basis wave function will on every iteration.
     """
     scf_obj_copy = scf_obj.copy()
-    original_irre_nelec = scf_obj_copy.get_irrep_nelec()
+    if mol.symmetry:
+        original_irre_nelec = scf_obj_copy.get_irrep_nelec()
     fullbasis_mol = create_shell_separated_mol(mol)
     is_restricted = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
@@ -1755,7 +1757,11 @@ def mask_analysis(
                 ecp = ecp_bas, symmetry = irrep_symb
                 )
             subbasis_mol.build()
-            submf = scf.HF(subbasis_mol)#.newton()
+            is_restricted = subbasis_mol.spin == 0
+            if is_restricted:
+                submf = subbasis_mol.RHF().newton()
+            else:
+                submf = subbasis_mol.UHF().newton()
             
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedF = mask_matrix(fock, mask, is_restricted)
@@ -1767,9 +1773,14 @@ def mask_analysis(
                 raise RuntimeError('The masked core Hamiltonian and the full core Hamiltonian of masked molecule do not match!')
 
             if dft:
-                submf = submf.to_ks(xc=xc)
+                if is_restricted:
+                    submf = subbasis_mol.RKS().newton()
+                else:
+                    submf = subbasis_mol.UKS().newton()
+                submf.xc = xc
                 submf.grids.level = grid_level
                 submf.grids.prune = None
+            submf = submf.apply(scf.addons.remove_linear_dep_)
 
             # SCF initial guess
             subbasis_energies, submf.mo_coeff = eig(maskedF, maskedS)
@@ -1790,9 +1801,12 @@ def mask_analysis(
                         del irrep_list[irname]
                 submf.irrep_nelec = irrep_list
             
+            if debug:
+                submf.verbose = 4
             submf.kernel()
+
             # Double check that occupations of the irreps have not changed
-            if not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
+            if mol.symmetry and not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
                 raise RuntimeError(f'The irrep occupations have changed from the ones dictated by the full basis solution.\nOriginal: {original_irre_nelec}\nThis cycle: {submf.get_irrep_nelec()}')
             
             subbasis_converged = submf.converged
