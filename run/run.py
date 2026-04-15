@@ -239,9 +239,9 @@ def run_abs(
             myhf = mol.UHF().newton()
         if dft:
             if is_restricted:
-                myhf = mol.RKS().newton()
+                myhf = mol.RKS()
             else:
-                myhf = mol.UKS().newton()
+                myhf = mol.UKS()
             myhf.xc = xc
             myhf.grids.level = grid_level
             myhf.grids.prune = None
@@ -263,8 +263,18 @@ def run_abs(
 
         if debug: myhf.verbose = 4
 
+        # Using level_shift, do a few first order SCF cycles
         myhf.init_guess = 'atom'
+        myhf.level_shift = 1.0
+        myhf.max_cycle = 3
         myhf.kernel()
+
+        # Restore default parameters and switch to second order CIAH
+        myhf = myhf.newton()
+        myhf.level_shift = 0.0
+        myhf.max_cycle = 50
+        myhf.kernel()
+
         # myhf.stability()
         
         end = time()

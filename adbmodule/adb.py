@@ -1774,9 +1774,9 @@ def mask_analysis(
 
             if dft:
                 if is_restricted:
-                    submf = subbasis_mol.RKS().newton()
+                    submf = subbasis_mol.RKS()#.newton()
                 else:
-                    submf = subbasis_mol.UKS().newton()
+                    submf = subbasis_mol.UKS()#.newton()
                 submf.xc = xc
                 submf.grids.level = grid_level
                 submf.grids.prune = None
@@ -1803,6 +1803,17 @@ def mask_analysis(
             
             if debug:
                 submf.verbose = 4
+
+            # Using level_shift, do a few first order SCF cycles
+            submf.level_shift = 1.0
+            submf.max_cycle = 3
+            submf.kernel()
+
+            # Use the level shift calulcation density as initial guess
+            # Restore default parameters and switch to second order CIAH
+            submf = submf.newton()
+            submf.level_shift = 0.0
+            submf.max_cycle = 50
             submf.kernel()
 
             # Double check that occupations of the irreps have not changed
