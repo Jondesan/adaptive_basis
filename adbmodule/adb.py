@@ -1774,9 +1774,9 @@ def mask_analysis(
 
             if dft:
                 if is_restricted:
-                    submf = subbasis_mol.RKS()#.newton()
+                    submf = subbasis_mol.RKS()
                 else:
-                    submf = subbasis_mol.UKS()#.newton()
+                    submf = subbasis_mol.UKS()
                 submf.xc = xc
                 submf.grids.level = grid_level
                 submf.grids.prune = None
@@ -1797,7 +1797,10 @@ def mask_analysis(
                 irrep_list = copy.deepcopy(submf.irrep_nelec)
                 for irname in submf.irrep_nelec:
                     if irname not in subbasis_mol.irrep_name:
-                        assert submf.irrep_nelec[irname] == (0, 0)
+                        if is_restricted:
+                            assert submf.irrep_nelec[irname] == 0
+                        else:
+                            assert submf.irrep_nelec[irname] == (0, 0)
                         del irrep_list[irname]
                 submf.irrep_nelec = irrep_list
             
