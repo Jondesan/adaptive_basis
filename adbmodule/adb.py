@@ -62,7 +62,7 @@ def dual_basis_energy_correction(
         dE = (np.trace(dP[0] @ F_full[0]) + np.trace(dP[1] @ F_full[1])) / 2
     else:
         dE = np.trace(dP @ F_full)
-    return dE, scf_obj.e_tot
+    return np.real(dE), scf_obj.e_tot
 
 
 def eig(
@@ -1597,12 +1597,10 @@ def mask_analysis(
     verbose:                bool                = True,
     sym_occ_fname:          str                 = 'occupations.dat',
     molfname:               str | None          = None,
-    basis:                  str                 = 'def2-tzvp',
     link_shells:            bool                = True,
     dft:                    bool                = False,
     xc:                     str                 = 'b3lyp',
     grid_level:             int                 = 7,
-    use_psi4:               bool                = False,
     C_full:                 np.ndarray | None   = None,
     calculate_correction:   bool                = False,
     irrep_nelec:            dict | None         = None,
@@ -1716,36 +1714,11 @@ def mask_analysis(
         
         print_data_header()
 
-    # If using Psi4, determine occupations on the fly
-    if use_psi4:
-        _, docc, socc, wfn_full, irrep_labels, irrep_symb = adbutils.psi4_fullbasis(
-            mol,
-            basis=basis,
-            init_guess=scf_obj_copy.init_guess,
-            dft=dft, xc=xc
-        )
-        AOCC = wfn_full.nalphapi().to_tuple()
-        BOCC = wfn_full.nbetapi().to_tuple()
-        symmetry_occs = list(zip(irrep_labels, AOCC, BOCC))
-        # Create symmetry occupation dict
-        #             IRREP: 2*alpha                      (alpha, beta)
-        # Example:    'A1':  1                            (2, 2)
-        irrep_nelec = {x[0]: 2*x[1] if is_restricted else (x[1], x[2]) for x in symmetry_occs}
-        if use_psi4:
-            # Get coefficient matrices
-            Ca = wfn_full.Ca_subset('AO', 'ALL').to_array(copy=True)
-            if not is_restricted:
-                Cb = wfn_full.Cb_subset('AO', 'ALL').to_array(copy=True)
-                C_full = np.asarray([Ca, Cb])
-            else:
-                C_full = Ca
     elif molfname is not None:
         irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file(sym_occ_fname, molfname=molfname)
         if irrep_nelec is None:
             irrep_symb = fullbasis_mol.symmetry#True
 
-    dm_prev = None
-    mol_prev = None
     for mask_i, current_val, difference, *init in mask_history:
         dE = 0.0
         if is_smask:
@@ -1784,15 +1757,11 @@ def mask_analysis(
                 submf.grids.prune = None
             submf = submf.apply(scf.addons.remove_linear_dep_)
 
-            # SCF initial guess
-            # If first round, diagonalize the masked Fock matrix and use those orbitals as guess
-            # else project the density from previous iteration (auxiliary basis) to current basis
-            if dm_prev is None and mol_prev is None:
-                subbasis_energies, submf.mo_coeff = eig(maskedF, maskedS)
-                submf.mo_occs = submf.get_occ(subbasis_energies)
-                dm0_init = submf.make_rdm1(submf.mo_coeff, submf.mo_occs)
-            else:
-                dm0_init = scf.addons.project_dm_nr2nr(mol_prev, dm_prev, subbasis_mol)
+            # SCF initial guess by projecting the density from full basis to current basis
+            dm0_init = scf.addons.project_dm_nr2nr(scf_obj.mol,
+                                                   scf_obj.make_rdm1(scf_obj.mo_coeff,
+                                                                     scf_obj.mo_occ),
+                                                   subbasis_mol)
 
             # Set the symmetry adapted occupations if present
             if irrep_nelec is not None:
