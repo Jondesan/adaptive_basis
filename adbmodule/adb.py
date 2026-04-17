@@ -716,13 +716,13 @@ def get_q_sqrd(
     RHF = (len(Cfull.shape) == 2)
     if RHF:
         Q = Cfull[:, :nocc[0]].T @ ovlp @ Csub[:, :nocc[0]]
-        return 2.0 * np.sum(np.sum(Q**2))
+        return 2.0 * np.real(np.sum(np.sum(Q**2)))
     else:
         Q = [
             Cfull[0, :, :nocc[0]].T @ ovlp @ Csub[0, :, :nocc[0]],
             Cfull[1, :, :nocc[1]].T @ ovlp @ Csub[1, :, :nocc[1]]
         ]
-        return (np.sum(np.sum(Q[0]**2)) + np.sum(np.sum(Q[1]**2)))
+        return np.real((np.sum(np.sum(Q[0]**2)) + np.sum(np.sum(Q[1]**2))))
 
 
 def set_linked_shells(
@@ -1744,6 +1744,8 @@ def mask_analysis(
         if irrep_nelec is None:
             irrep_symb = fullbasis_mol.symmetry#True
 
+    dm_prev = None
+    mol_prev = None
     for mask_i, current_val, difference, *init in mask_history:
         dE = 0.0
         if is_smask:
@@ -1759,9 +1761,9 @@ def mask_analysis(
             subbasis_mol.build()
             is_restricted = subbasis_mol.spin == 0
             if is_restricted:
-                submf = subbasis_mol.RHF().newton()
+                submf = subbasis_mol.RHF()#.newton()
             else:
-                submf = subbasis_mol.UHF().newton()
+                submf = subbasis_mol.UHF()#.newton()
             
             mask = smask_to_mask(smask, fullbasis_mol.cart)
             maskedF = mask_matrix(fock, mask, is_restricted)
@@ -1783,8 +1785,14 @@ def mask_analysis(
             submf = submf.apply(scf.addons.remove_linear_dep_)
 
             # SCF initial guess
-            subbasis_energies, submf.mo_coeff = eig(maskedF, maskedS)
-            submf.mo_occs = submf.get_occ(subbasis_energies)
+            # If first round, diagonalize the masked Fock matrix and use those orbitals as guess
+            # else project the density from previous iteration (auxiliary basis) to current basis
+            if dm_prev is None and mol_prev is None:
+                subbasis_energies, submf.mo_coeff = eig(maskedF, maskedS)
+                submf.mo_occs = submf.get_occ(subbasis_energies)
+                dm0_init = submf.make_rdm1(submf.mo_coeff, submf.mo_occs)
+            else:
+                dm0_init = scf.addons.project_dm_nr2nr(mol_prev, dm_prev, subbasis_mol)
 
             # Set the symmetry adapted occupations if present
             if irrep_nelec is not None:
@@ -1810,7 +1818,7 @@ def mask_analysis(
             # Using level_shift, do a few first order SCF cycles
             submf.level_shift = 1.0
             submf.max_cycle = 3
-            submf.kernel()
+            submf.kernel(dm0=dm0_init)
 
             # Use the level shift calulcation density as initial guess
             # Restore default parameters and switch to second order CIAH
@@ -1818,6 +1826,9 @@ def mask_analysis(
             submf.level_shift = 0.0
             submf.max_cycle = 50
             submf.kernel()
+
+            mol_prev = subbasis_mol.copy()
+            dm_prev = submf.make_rdm1(submf.mo_coeff, submf.mo_occ)
 
             # Double check that occupations of the irreps have not changed
             if mol.symmetry and not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
