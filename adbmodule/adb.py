@@ -1658,7 +1658,7 @@ def mask_analysis(
             full basis wave function will on every iteration.
     """
     scf_obj_copy = scf_obj.copy()
-    if mol.symmetry:
+    if mol.symmetry and mol.groupname != 'C1':
         original_irre_nelec = scf_obj_copy.get_irrep_nelec()
     fullbasis_mol = create_shell_separated_mol(mol)
     is_restricted = len(fock.shape) == 2
