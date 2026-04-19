@@ -379,7 +379,7 @@ def run_abs(
                     data_sbys = adb.mask_analysis(
                         smaskhistory, shellsep_mol, myhf,
                         F, S, dft = dft, xc = xc, grid_level = grid_level,
-                        use_psi4 = use_psi4, molfname = molfilename,
+                        molfname = molfilename,
                         sym_occ_fname = symmetry_occ_fname,
                         C_full = mo_coeff_scf,
                         calculate_correction = calculate_DB_correction,
