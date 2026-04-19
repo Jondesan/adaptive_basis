@@ -1714,10 +1714,11 @@ def mask_analysis(
         
         print_data_header()
 
-    elif molfname is not None:
-        irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file(sym_occ_fname, molfname=molfname)
-        if irrep_nelec is None:
-            irrep_symb = fullbasis_mol.symmetry#True
+    # irrep_symb = None
+    # if molfname is not None:
+    #     irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file(sym_occ_fname, molfname=molfname)
+    if irrep_nelec is None:
+        irrep_symb = fullbasis_mol.symmetry#True
 
     for mask_i, current_val, difference, *init in mask_history:
         dE = 0.0
@@ -1795,9 +1796,6 @@ def mask_analysis(
             submf.level_shift = 0.0
             submf.max_cycle = 50
             submf.kernel()
-
-            mol_prev = subbasis_mol.copy()
-            dm_prev = submf.make_rdm1(submf.mo_coeff, submf.mo_occ)
 
             # Double check that occupations of the irreps have not changed
             if mol.symmetry and not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
