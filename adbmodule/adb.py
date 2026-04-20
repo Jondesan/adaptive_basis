@@ -1714,12 +1714,6 @@ def mask_analysis(
         
         print_data_header()
 
-    # irrep_symb = None
-    # if molfname is not None:
-    #     irrep_nelec, irrep_symb = adbutils.read_symmetry_occs_from_file(sym_occ_fname, molfname=molfname)
-    if irrep_nelec is None:
-        irrep_symb = fullbasis_mol.symmetry#True
-
     for mask_i, current_val, difference, *init in mask_history:
         dE = 0.0
         if is_smask:
@@ -1730,7 +1724,7 @@ def mask_analysis(
                 atom = fullbasis_mol.atom, basis = extracted_basis,
                 charge = fullbasis_mol.charge, spin = fullbasis_mol.spin,
                 verbose = fullbasis_mol.verbose, unit = fullbasis_mol.unit,
-                ecp = ecp_bas, symmetry = irrep_symb
+                ecp = ecp_bas, symmetry = fullbasis_mol.symmetry
                 )
             subbasis_mol.build()
             is_restricted = subbasis_mol.spin == 0
@@ -1765,12 +1759,16 @@ def mask_analysis(
                                                    subbasis_mol)
 
             # Set the symmetry adapted occupations if present
-            if irrep_nelec is not None:
-                submf.irrep_nelec = irrep_nelec
-            elif not mol.symmetry or mol.groupname == 'C1':
+            # print(f'{irrep_nelec=}')
+            # print(f'{submf.irrep_nelec=}')
+            # print(f'{subbasis_mol.irrep_name=}')
+            if not mol.symmetry or mol.groupname == 'C1':
                 submf.irrep_nelec = None
             else:
-                submf.irrep_nelec = scf_obj_copy.get_irrep_nelec()
+                if irrep_nelec is not None:
+                    submf.irrep_nelec = irrep_nelec
+                else:
+                    submf.irrep_nelec = scf_obj_copy.get_irrep_nelec()
                 # Remove any irreps that are not present in mol
                 irrep_list = copy.deepcopy(submf.irrep_nelec)
                 for irname in submf.irrep_nelec:
