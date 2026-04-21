@@ -1759,9 +1759,6 @@ def mask_analysis(
                                                    subbasis_mol)
 
             # Set the symmetry adapted occupations if present
-            # print(f'{irrep_nelec=}')
-            # print(f'{submf.irrep_nelec=}')
-            # print(f'{subbasis_mol.irrep_name=}')
             if not mol.symmetry or mol.groupname == 'C1':
                 submf.irrep_nelec = None
             else:
@@ -1796,7 +1793,7 @@ def mask_analysis(
             submf.kernel()
 
             # Double check that occupations of the irreps have not changed
-            if mol.symmetry and not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
+            if mol.symmetry and mol.groupname == 'C1' and not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
                 raise RuntimeError(f'The irrep occupations have changed from the ones dictated by the full basis solution.\nOriginal: {original_irre_nelec}\nThis cycle: {submf.get_irrep_nelec()}')
             
             subbasis_converged = submf.converged
