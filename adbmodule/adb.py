@@ -1793,8 +1793,9 @@ def mask_analysis(
             submf.kernel()
 
             # Double check that occupations of the irreps have not changed
-            if mol.symmetry and mol.groupname == 'C1' and not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
-                raise RuntimeError(f'The irrep occupations have changed from the ones dictated by the full basis solution.\nOriginal: {original_irre_nelec}\nThis cycle: {submf.get_irrep_nelec()}')
+            if mol.symmetry and mol.groupname != 'C1':
+                if not all([elem == submf.get_irrep_nelec()[key] for key, elem in submf.get_irrep_nelec().items()]):
+                    raise RuntimeError(f'The irrep occupations have changed from the ones dictated by the full basis solution.\nOriginal: {original_irre_nelec}\nThis cycle: {submf.get_irrep_nelec()}')
             
             subbasis_converged = submf.converged
             scf_energy = submf.e_tot
