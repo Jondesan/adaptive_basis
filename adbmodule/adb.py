@@ -38,13 +38,6 @@ NFUNCS = {
     'J': 15,
 }
 
-def tk_debugger(*vars):
-    print('######## TEEKKARIN DEBUGGER #############################')
-    for var in vars:
-        print(var, end = ' ')
-    print()
-    print('######## TEEKKARIN DEBUGGER END #########################')
-
 
 def dual_basis_energy_correction(
     scf_obj: scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
@@ -517,29 +510,6 @@ def get_all_shell_labels(mol: gto.MoleBase) -> list[str]:
             labels.append((ia, symb, '%d%s' % (n, strl)))
 
     return labels
-
-
-def functions_per_shell(mol):
-    """Counts the number of functions per shell for the mol object.
-    
-    Args:
-        mol : pyscf.gto.MoleBase
-            The molecule object
-    
-    Returns:
-        fpershell : np.ndarray
-            An array whose elements correspond to the number of functions
-            on the corresponding shell.
-    """
-    raise NotImplementedError("This function has not been implemented yet.")
-    def funcs_on_shell(angl, cart=False):
-        return (angl + 1) * (angl + 2) / 2 if cart else 2 * angl + 1
-
-    nshells = len(set(mol._bas[:,:2]))  # Count the number of unique pairs
-                                        # of atom-id and angular-momentum
-    fpershell = np.zeros(nshells)
-
-    return fpershell
 
 
 def link_shells(mol, mask):
