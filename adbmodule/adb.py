@@ -11,9 +11,9 @@ from pyscf.data.elements import _std_symbol, ELEMENTS
 from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
 from pyscf.scf import *
-# from pyscf.scf.hf import eig
 from pyscf.scf.addons import canonical_orth_, project_dm_nr2nr
 from pyscf import lib, gto, scf
+import pyscf
 from warnings import warn
 from operator import itemgetter
 import adbutils
@@ -918,7 +918,7 @@ def atomic_block_minimal_basis(
                 mask_atom[Pat_j] = True
                 smask_atom = mask_to_smask(mask_atom, smask_atom, mol.cart)
                 mask_atom = smask_to_mask(smask_atom, mol.cart)
-                _, c_mask = hf.eig(
+                _, c_mask = eig(
                     mask_matrix(F_ave.copy(), mask_atom),
                     mask_matrix(S_atom.copy(), mask_atom)
                     )
@@ -1155,7 +1155,7 @@ def pseudominimal_basis_nearest_neighbor(
                 mask_block[Pbl_j] = True
                 smask_block = mask_to_smask(mask_block, smask_block, mol.cart)
                 mask_block  = smask_to_mask(smask_block, mol.cart)
-                _, c_mask = hf.eig(
+                _, c_mask = eig(
                     mask_matrix(F_ave.copy(),  mask_block),
                     mask_matrix(S_block.copy(), mask_block)
                     )
