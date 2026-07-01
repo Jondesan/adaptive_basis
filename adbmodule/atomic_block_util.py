@@ -479,7 +479,7 @@ def find_projected_minimal_basis_mask(
         # selected functions from the pool of available ones
         ovlp_col[mask] = 0.0
 
-        idx = np.argmax(ovlp_col[shell_offset:shell_offset + nfunc_angl])
+        idx = np.argmax(np.abs(ovlp_col[shell_offset:shell_offset + nfunc_angl]))
         mask[shell_offset + idx] = 1
 
     mask = adb.link_shells(mol, mask)
