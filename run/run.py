@@ -415,11 +415,6 @@ def run_abs(
                         )
                     )
 
-                    # if variant == 'enocc':
-                        # f.write("function-by-function iteration\n")
-                        # df_fbyf.to_csv(f, index=False)
-                        # f.write("\n\n")
-
                     f.write("shell-by-shell iteration\n")
                     df_sbys.to_csv(f, index=False)
                     f.write("\n\n")
