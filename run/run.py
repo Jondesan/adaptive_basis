@@ -4,6 +4,7 @@ import sys
 import os
 import copy
 import argparse
+import fcntl
 
 import adb
 from pyscf import scf, gto
@@ -576,6 +577,28 @@ def run_atomic_block_decomp_on_molecule_set(
                     # f.write(f'{abd_conv};{abs_conv};{full_conv}\n')
 
 
+def _append_criterion_result(output_file, row):
+    """Append one result row to output_file under an exclusive flock.
+
+    Safe to call from concurrent processes on the same file: the lock
+    prevents interleaved writes and ensures only one process writes the
+    header (when the file is empty).
+    """
+    header = 'molname;basis;init_guess;variant;criterion_value\n'
+    line = (
+        f"{row['molname']};{row['basis']};{row['init_guess']};"
+        f"{row['variant']};{row['criterion_value']:.12f}\n"
+    )
+    with open(output_file, 'a') as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        try:
+            if f.tell() == 0:
+                f.write(header)
+            f.write(line)
+        finally:
+            fcntl.flock(f, fcntl.LOCK_UN)
+
+
 def compute_fullbasis_criterion(
     mol_list,
     variant='enocc',
@@ -583,6 +606,7 @@ def compute_fullbasis_criterion(
     xc='pbe,pbe',
     grid_level=7,
     sap_basis_sets='sapgraspsmall',
+    output_file=None,
 ):
     """Compute the iteration criterion value at full basis for each molecule.
 
@@ -604,6 +628,11 @@ def compute_fullbasis_criterion(
             DFT integration grid level (0-9). Default 7.
         sap_basis_sets : str or list
             SAP basis set name(s), used when init_guess is 'sap'.
+        output_file : str or None
+            Path to the output file. Results are appended one line at a
+            time under an exclusive lock, so concurrent script instances
+            writing to the same file will not lose data. If None, no file
+            is written.
 
     Returns:
         results : list of dict
@@ -678,13 +707,16 @@ def compute_fullbasis_criterion(
                 ig_label = ig if ig != 'sap' else \
                     f"sap({sapbs.strip().split('/')[-1].split('.')[0]})"
                 print(f'{molname} ({basisname}, {ig_label}): full basis {variant} = {criterion_value:.9f}')
-                results.append({
+                row = {
                     'molname': molname,
                     'basis': basisname,
                     'init_guess': ig_label,
                     'variant': variant,
                     'criterion_value': criterion_value,
-                })
+                }
+                results.append(row)
+                if output_file is not None:
+                    _append_criterion_result(output_file, row)
 
     return results
 
@@ -817,10 +849,10 @@ if __name__ == "__main__":
         help="Run mode, optional. Default is 'abs'.",
     )
     parser.add_argument(
-        "--output_file_name",
+        "--fn_output",
         type=str,
         default='output.dat',
-        help="Ouput file name for 'abd' run mode. Default 'output.dat'"
+        help="Ouput file name for 'abd' and 'full_crit' run modes. Default 'output.dat'"
     )
     parser.add_argument(
         "--sph_avg_fock",
@@ -867,7 +899,7 @@ if __name__ == "__main__":
     sym_occ_file = args.sym_occ_file
     pnt_grp_file = args.point_group_file
     run_mode = args.run_mode
-    output_file_name = args.output_file_name
+    fn_output = args.fn_output
     sph_avg_fock = args.sph_avg_fock
     symm = args.symmetry
     odir = args.output_dir
@@ -934,7 +966,7 @@ if __name__ == "__main__":
                 mols,
                 q_tol=q_tol,
                 run_dft=dft,
-                output=output_file_name,
+                output=fn_output,
                 spherically_average_fock=sph_avg_fock,
             )
         case 'full_crit':
@@ -943,4 +975,5 @@ if __name__ == "__main__":
                 variant=variant,
                 dft=dft,
                 sap_basis_sets=sapbasis,
+                output_file=fn_output,
             )
