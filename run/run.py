@@ -330,7 +330,7 @@ def run_abs(
                         F = F_scf
                     else:
                         if ig == 'vsap':
-                            tempmf = mol.KS().set(xc='b3lyp')
+                            tempmf = mol.KS().set(xc=xc)
                             dm0 = tempmf.get_init_guess(key='vsap')
                         else:
                             myhf.sap_basis = sapbs
@@ -576,6 +576,119 @@ def run_atomic_block_decomp_on_molecule_set(
                     # f.write(f'{abd_conv};{abs_conv};{full_conv}\n')
 
 
+def compute_fullbasis_criterion(
+    mol_list,
+    variant='enocc',
+    dft=False,
+    xc='pbe,pbe',
+    grid_level=7,
+    sap_basis_sets='sapgraspsmall',
+):
+    """Compute the iteration criterion value at full basis for each molecule.
+
+    Builds the Fock matrix from the initial guess density (no SCF), then
+    evaluates the criterion defined by `variant` by diagonalizing in the
+    full basis — equivalent to the value find_subspace converges toward.
+
+    Args:
+        mol_list : list
+            List of molecules as returned by get_molecules_in_dir.
+        variant : str
+            Criterion variant: 'enocc' (sum of occupied orbital energies)
+            or 'elden' (Q^2 projection quality). Default 'enocc'.
+        dft : bool
+            Use DFT instead of HF. Default False.
+        xc : str
+            XC functional string (PySCF format). Default 'pbe,pbe'.
+        grid_level : int
+            DFT integration grid level (0-9). Default 7.
+        sap_basis_sets : str or list
+            SAP basis set name(s), used when init_guess is 'sap'.
+
+    Returns:
+        results : list of dict
+            Each dict contains 'molname', 'basis', 'init_guess', 'variant',
+            and 'criterion_value' for one (molecule, init_guess) pair.
+    """
+    results = []
+
+    for molfilename, mol, shellsep_mol, shells, ig_list, basisname in mol_list:
+        molname = molfilename.split(".")[0]
+        nocc = mol.nelec
+
+        if mol.spin == 0:
+            myhf = mol.RHF()
+        else:
+            myhf = mol.UHF()
+        if dft:
+            if mol.spin == 0:
+                myhf = mol.RKS()
+            else:
+                myhf = mol.UKS()
+            myhf.xc = xc
+            myhf.grids.level = grid_level
+            myhf.grids.prune = None
+        myhf = myhf.apply(scf.addons.remove_linear_dep_)
+
+        S = myhf.get_ovlp()
+
+        if ig_list is None:
+            ig_list = ['atom']
+
+        F_scf = None
+        if 'scf' in ig_list:
+            myhf.init_guess = 'atom'
+            myhf.level_shift = 1.0
+            myhf.max_cycle = 3
+            myhf.kernel()
+            myhf = myhf.newton()
+            myhf.level_shift = 0.0
+            myhf.max_cycle = 50
+            myhf.kernel()
+            F_scf = myhf.get_fock()
+
+        for ig in ig_list:
+            if ig == 'sap':
+                sapbases = np.asarray(sap_basis_sets)
+            else:
+                sapbases = [None]
+
+            for sapbs in sapbases:
+                if ig == 'scf':
+                    F = F_scf
+                elif ig == 'vsap':
+                    tempmf = mol.KS().set(xc=xc)
+                    dm0 = tempmf.get_init_guess(key='vsap')
+                    F = myhf.get_fock(dm=dm0)
+                else:
+                    myhf.sap_basis = sapbs
+                    dm0 = myhf.get_init_guess(key=ig)
+                    F = myhf.get_fock(dm=dm0)
+
+                evals, evecs = adb.eig(F, S)
+                criterion_value = adb.get_iteration_criteria_value(
+                    variant,
+                    epsilon_i=evals,
+                    nocc=nocc,
+                    Cfull=evecs,
+                    Csub=evecs,
+                    ovlp=S,
+                )
+
+                ig_label = ig if ig != 'sap' else \
+                    f"sap({sapbs.strip().split('/')[-1].split('.')[0]})"
+                print(f'{molname} ({basisname}, {ig_label}): full basis {variant} = {criterion_value:.9f}')
+                results.append({
+                    'molname': molname,
+                    'basis': basisname,
+                    'init_guess': ig_label,
+                    'variant': variant,
+                    'criterion_value': criterion_value,
+                })
+
+    return results
+
+
 def run_occupations(
     mol_list,
     dft=False,
@@ -700,7 +813,7 @@ if __name__ == "__main__":
         "--run_mode",
         type=str,
         default='abs',
-        choices=['abs', 'occs', 'abd'],
+        choices=['abs', 'occs', 'abd', 'full_crit'],
         help="Run mode, optional. Default is 'abs'.",
     )
     parser.add_argument(
@@ -823,4 +936,11 @@ if __name__ == "__main__":
                 run_dft=dft,
                 output=output_file_name,
                 spherically_average_fock=sph_avg_fock,
+            )
+        case 'full_crit':
+            compute_fullbasis_criterion(
+                mols,
+                variant=variant,
+                dft=dft,
+                sap_basis_sets=sapbasis,
             )
