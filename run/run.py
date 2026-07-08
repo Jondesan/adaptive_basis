@@ -276,8 +276,6 @@ def run_abs(
         myhf.max_cycle = 50
         myhf.kernel()
 
-        # myhf.stability()
-        
         end = time()
         e_tot = myhf.e_tot
 
@@ -389,14 +387,6 @@ def run_abs(
                     )
                     end = time()
 
-                    if use_psi4:
-                        e_tot_psi4, docc_full, socc_full, wfn_full, irrep_labels = adbutils.psi4_fullbasis(
-                            mol,
-                            basis=basisname,
-                            init_guess=myhf.init_guess,
-                            dft=dft, xc=xc
-                        )
-                        e_tot = e_tot_psi4
                     f.write(f"{end-start:15.9e}\n\n")
 
                     # if variant == 'enocc':
@@ -706,7 +696,7 @@ def compute_fullbasis_criterion(
 
                 ig_label = ig if ig != 'sap' else \
                     f"sap({sapbs.strip().split('/')[-1].split('.')[0]})"
-                print(f'{molname} ({basisname}, {ig_label}): full basis {variant} = {criterion_value:.9f}')
+                print(f'{molname} ({basisname}, {ig_label}): full basis {variant} = {criterion_value:.15f}')
                 row = {
                     'molname': molname,
                     'basis': basisname,
