@@ -203,10 +203,11 @@ class TestSphericalAverage:
 class TestIterationCriteria:
 
     def test_enocc_rhf_sums_occupied_eigenvalues(self):
-        """enocc RHF: returns sum of the first nocc[0] eigenvalues."""
+        """enocc RHF: returns 2x the sum of the first nocc[0] eigenvalues
+        (each restricted spatial orbital holds 2 electrons)."""
         epsilon = np.array([-1.5, -0.5, 0.3, 1.0])
         result = adb.get_iteration_criteria_value('enocc', epsilon_i=epsilon, nocc=(2, 2))
-        np.testing.assert_allclose(result, -2.0)
+        np.testing.assert_allclose(result, -4.0)
 
     def test_enocc_uhf_sums_both_spins(self):
         """enocc UHF: returns sum of occupied alpha + occupied beta eigenvalues."""
