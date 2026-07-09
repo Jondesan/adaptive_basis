@@ -1373,7 +1373,7 @@ def find_subspace(
                 'Max element of Fock matrix'))
 
     while True and not np.all(mask):
-        mask, difference, current_criteria_val, smask = expand_mask(
+        mask, difference, current_criteria_val, n_added, smask = expand_mask(
             F, S, nocc, mask,
             hcore=scf_obj_copy.get_hcore(),
             Cfull=scf_obj_copy.mo_coeff,
@@ -1381,6 +1381,14 @@ def find_subspace(
             nfunc_normalisation=nfunc_normalisation,
         )
 
+        if not basis_initialized:
+            basis_initialized = np.sum(mask) >= np.max(nocc)
+            continue
+        
+        if  abs(n_added * difference) < conv_tol  or \
+            sum(mask) == len(mask):
+            break
+        
         if return_mask_history:
             if basis_initialized:
                 mask_history.append(
@@ -1396,13 +1404,6 @@ def find_subspace(
 
         previous_sum = current_criteria_val
 
-        if not basis_initialized:
-            basis_initialized = np.sum(mask) >= np.max(nocc)
-            continue
-        
-        if  abs(difference) < conv_tol  or \
-            sum(mask) == len(mask):
-            break
 
     if get_smask:
         mask = smask
@@ -1424,7 +1425,7 @@ def expand_mask(
     Cfull:                  np.ndarray | None   = None,
     link_shells:            bool                = True,
     nfunc_normalisation:    bool                = True,
-    ) -> tuple[np.ndarray, float, float, np.ndarray | None]:
+    ) -> tuple[np.ndarray, float, float, int, np.ndarray | None]:
     r"""Expands the current mask by either one function or one shell
     based on smask.
 
@@ -1557,7 +1558,9 @@ def expand_mask(
         submask[:, 0] = True
         smask[shl_indices[current_idx_to_flip]] = submask
         mask = smask_to_mask(smask)
-    return mask, test_differences[array_index], test_sums[array_index][1], smask
+
+    nfuncs_in_trial = test_sums[array_index][2]
+    return mask, test_differences[array_index], test_sums[array_index][1], nfuncs_in_trial, smask
 
 
 def mask_analysis(
