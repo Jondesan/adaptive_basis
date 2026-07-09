@@ -36,3 +36,57 @@ class TestSmaskToMask:
         m[31] = m[34:37] = m[37] = m[40:43] = 1
         sm = adb.init_smask(h2o_def2tzvp, h2o_def2tzvp.cart)
         np.testing.assert_array_equal(m, adb.smask_to_mask(adb.mask_to_smask(m, sm)))
+
+    def test_smask_nfuncs_matches_mol_nao(self, h2o_def2tzvp):
+        sm = adb.init_smask(h2o_def2tzvp, h2o_def2tzvp.cart)
+        nfunc_in_smask = np.sum(sm[:,1])
+        assert(h2o_def2tzvp.nao_nr() == nfunc_in_smask)
+
+
+# ---------------------------------------------------------------------------
+# adb.mask_matrix
+# ---------------------------------------------------------------------------
+
+class TestMaskMatrix:
+
+    def test_mask_matrix_rhf(self):
+        mat = np.array([
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+        ])
+        mask = np.array([0, 0, 1, 1, 0, 1, 0, 0], dtype=bool)
+        masked_mat = adb.mask_matrix(mat, mask)
+        test_mat = np.array([
+            [3, 4, 6],
+            [3, 4, 6],
+            [3, 4, 6],
+        ])
+        np.testing.assert_array_equal(masked_mat, test_mat)
+
+    def test_mask_matrix_uhf(self):
+        mat = np.array([
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+            [1, 2, 3, 4, 5, 6, 7, 8],
+        ])
+        mat = np.array([mat, mat])
+        mask = np.array([0, 0, 1, 1, 0, 1, 0, 0], dtype=bool)
+        masked_mat = adb.mask_matrix(mat, mask)
+        test_mat = np.array([
+            [3, 4, 6],
+            [3, 4, 6],
+            [3, 4, 6],
+        ])
+        test_mat = np.array([test_mat, test_mat])
+        np.testing.assert_array_equal(masked_mat, test_mat)

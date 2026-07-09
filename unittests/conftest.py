@@ -33,6 +33,20 @@ def h2o_sto3g():
     )
 
 @pytest.fixture(scope="session")
+def h2o_sto3g_c2v():
+    """Same geometry/basis as h2o_sto3g, but with mol.symmetry enabled.
+
+    Used by the optional symmetry-aware adaptive-basis-search tests; none
+    of the other fixtures here set mol.symmetry.
+    """
+    return pyscf.M(
+        atom="O 0 0 0; H 0 0.757 0.587; H 0 -0.757 0.587",
+        basis="sto-3g",
+        symmetry=True,
+        verbose=0,
+    )
+
+@pytest.fixture(scope="session")
 def h2o_mf(h2o_def2tzvp):
     mf = h2o_def2tzvp.HF()
     mf.verbose = 0

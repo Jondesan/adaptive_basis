@@ -61,20 +61,21 @@ def initial_mask(scf_data):
 
 class TestExpandMask:
 
-    def test_returns_four_tuple(self, scf_data, initial_mask):
-        """expand_mask must return exactly four values."""
+    def test_returns_five_tuple(self, scf_data, initial_mask):
+        """expand_mask must return exactly five values (mask, difference,
+        criteria_val, nfuncs_in_trial, smask)."""
         d = scf_data
         result = adb.expand_mask(
             d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
-        assert len(result) == 4
+        assert len(result) == 5
 
     def test_new_mask_is_superset_of_old(self, scf_data, initial_mask):
         """Every function that was True before must still be True after expansion."""
         d = scf_data
         old_mask = copy.deepcopy(initial_mask)
-        new_mask, _, _, _ = adb.expand_mask(
+        new_mask, _, _, _, _ = adb.expand_mask(
             d["F"], d["S"], d["nocc"], copy.deepcopy(old_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
@@ -84,7 +85,7 @@ class TestExpandMask:
         """Each call must add at least one function to the mask."""
         d = scf_data
         old_count = np.sum(initial_mask)
-        new_mask, _, _, _ = adb.expand_mask(
+        new_mask, _, _, _, _ = adb.expand_mask(
             d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
@@ -93,7 +94,7 @@ class TestExpandMask:
     def test_smask_is_none_when_not_provided(self, scf_data, initial_mask):
         """When called without a smask argument, the returned smask must be None."""
         d = scf_data
-        _, _, _, smask_out = adb.expand_mask(
+        _, _, _, _, smask_out = adb.expand_mask(
             d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"],
         )
@@ -102,7 +103,7 @@ class TestExpandMask:
     def test_difference_is_negative_for_enocc(self, scf_data, initial_mask):
         """For enocc, adding an orbital lowers the sum, so difference should be ≤ 0."""
         d = scf_data
-        _, diff, _, _ = adb.expand_mask(
+        _, diff, _, _, _ = adb.expand_mask(
             d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
@@ -115,7 +116,7 @@ class TestExpandMask:
         prev_count = np.sum(mask)
 
         for _ in range(d["mol"].nao - np.sum(initial_mask)):
-            mask, _, _, _ = adb.expand_mask(
+            mask, _, _, _, _ = adb.expand_mask(
                 d["F"], d["S"], d["nocc"], mask,
                 hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
             )
