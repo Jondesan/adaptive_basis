@@ -14,7 +14,7 @@ from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
 from pyscf.scf import *
 from pyscf.scf.addons import canonical_orth_, project_dm_nr2nr
-from pyscf import lib, gto, scf
+from pyscf import lib, gto, scf, symm
 import pyscf
 from warnings import warn
 from operator import itemgetter
@@ -39,6 +39,14 @@ NFUNCS = {
     'I': 13,
     'J': 15,
 }
+
+# Penalty (in Hartree) added per electron slot that a target irrep cannot
+# yet hold in a partially-grown trial subbasis, used by the optional
+# symmetry-aware 'enocc' criterion in get_iteration_criteria_value. Chosen
+# to be many orders of magnitude larger than any physically meaningful
+# orbital-energy sum, so the greedy search always prioritises adding shells
+# of an under-represented irrep before anything else.
+SYMMETRY_SHORTFALL_PENALTY = 1e3
 
 
 def dual_basis_energy_correction(
@@ -98,6 +106,71 @@ def canonical_orth(
     c = x @ c
     idx = np.argsort(e)
     return e[idx], c[:,idx]
+
+
+def symmetrized_eig(
+        h:          np.ndarray,
+        s:          np.ndarray,
+        symm_orb:   list,
+        irrep_id:   list,
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Block-diagonalize (h, s) by irrep and solve each block with
+    canonical_orth.
+
+    This mirrors the structure of pyscf.scf.hf_symm.eig (symmetrize h/s
+    into per-irrep blocks via pyscf.symm.symmetrize_matrix, one
+    generalized eigenproblem per irrep) but solves each block with adb's
+    own canonical_orth instead of plain scipy.linalg.eigh, since the
+    (masked) sub-Fock matrices this is used on are frequently
+    near-singular -- the same reason adb.eig exists instead of calling
+    scipy directly.
+
+    Args:
+        h : ndarray
+            Fock/Hamiltonian matrix. 2D for RHF. For UHF, pass a stacked
+            (2, nao, nao) array (alpha, beta) exactly like adb.eig -- the
+            irrep block structure is spin-independent (it only depends on
+            symm_orb/s), so both spins share one `orbsym`.
+        s : ndarray
+            Overlap matrix, same AO dimension as h (spin-independent).
+        symm_orb : list of ndarray
+            Symmetry-adapted basis coefficients, one (nao, n_ir) array per
+            irrep, e.g. mol.symm_orb / subbasis_mol.symm_orb. Must be
+            expressed in the same AO basis/ordering as h and s.
+        irrep_id : list of int
+            Irrep id for each entry of symm_orb, e.g. mol.irrep_id.
+
+    Returns:
+        e : ndarray
+            Eigenvalues, grouped by irrep block (not globally sorted --
+            matches pyscf's own symmetric-eig convention). Shape (2, nmo)
+            for UHF input, (nmo,) for RHF input.
+        c : ndarray
+            Eigenvectors, back-transformed to the AO basis of h/s. Shape
+            (2, nao, nmo) for UHF input, (nao, nmo) for RHF input.
+        orbsym : ndarray
+            Irrep id for each column of e/c along its last axis, shape
+            (nmo,) -- shared between spins for UHF input.
+    """
+    def _block_eig(h2d):
+        hs = symm.symmetrize_matrix(h2d, symm_orb)
+        ss = symm.symmetrize_matrix(s, symm_orb)
+        es, cs, osym = [], [], []
+        for ir in range(len(symm_orb)):
+            if symm_orb[ir].shape[1] == 0:
+                continue
+            e_ir, c_ir = canonical_orth(hs[ir], ss[ir])
+            es.append(e_ir)
+            cs.append(symm_orb[ir] @ c_ir)
+            osym.append(np.full(e_ir.size, irrep_id[ir]))
+        return np.hstack(es), np.hstack(cs), np.hstack(osym)
+
+    if len(np.asarray(h).shape) == 3:
+        ea, ca, orbsym = _block_eig(h[0])
+        eb, cb, _ = _block_eig(h[1])
+        return np.asarray([ea, eb]), np.asarray([ca, cb]), orbsym
+    else:
+        return _block_eig(h)
 
 
 def extract_basis(
@@ -416,7 +489,9 @@ def get_iteration_criteria_value(
     sub_hcore:  np.ndarray | None   = None,
     Csub:       np.ndarray | None   = None,
     Cfull:      np.ndarray | None   = None,
-    ovlp:       np.ndarray | None   = None
+    ovlp:       np.ndarray | None   = None,
+    irrep_nelec: dict      | None   = None,
+    orbsym:     np.ndarray | None   = None,
     ) -> float:
     """Calculates the value of the chosen variants criteria.
 
@@ -438,7 +513,22 @@ def get_iteration_criteria_value(
             overlap matrix
         nocc : tuple
             number of occupations
-    
+        irrep_nelec : dict | None
+            Optional, 'enocc' only. Target occupation per irrep name, in
+            the same format as pyscf's mf.irrep_nelec (int for restricted,
+            (n_alpha, n_beta) tuple for unrestricted). When given (together
+            with `orbsym`), the criterion sums the lowest target-occupation
+            eigenvalues *within each irrep* instead of the lowest N
+            eigenvalues overall, penalising irreps whose current orbital
+            count falls short of their target (see
+            SYMMETRY_SHORTFALL_PENALTY). When None (default), behaviour is
+            unchanged from before this option existed.
+        orbsym : ndarray | None
+            Optional, 'enocc' only. Irrep name (string) for each entry
+            along epsilon_i's last axis, as returned by symmetrized_eig
+            after translating irrep ids to names. Required whenever
+            `irrep_nelec` is given.
+
     Returns:
         criteria : float
             Value of the criteria
@@ -452,14 +542,61 @@ def get_iteration_criteria_value(
             if epsilon_i is None or nocc is None:
                 raise ValueError("Energies 'epsilon_i' or occupations 'nocc' not provided.")
             restricted = (len(np.asarray(epsilon_i).shape) == 1)
-            if restricted:
-                criteria = np.sum(epsilon_i[:nocc[0]])
+            if irrep_nelec is not None:
+                if orbsym is None:
+                    raise ValueError(
+                        "'orbsym' must be provided together with 'irrep_nelec'.")
+                criteria = _enocc_by_irrep(epsilon_i, orbsym, irrep_nelec, restricted)
+            elif restricted:
+                criteria = 2 * np.sum(epsilon_i[:nocc[0]])
             else:
                 criteria  = np.sum(epsilon_i[0,:nocc[0]])
-                criteria += np.sum(epsilon_i[1,:nocc[1]]) 
+                criteria += np.sum(epsilon_i[1,:nocc[1]])
             return float(np.real(criteria))
         case 'elden':
             return get_q_sqrd(Cfull, Csub, ovlp, nocc)
+
+
+def _enocc_by_irrep(
+        epsilon_i:      np.ndarray,
+        orbsym:         np.ndarray,
+        irrep_nelec:    dict,
+        restricted:     bool,
+        ) -> float:
+    """Irrep-resolved 'enocc' criterion used by the optional symmetry-aware
+    search: sum the lowest target-occupation orbitals within each irrep
+    (per pyscf's mf.irrep_nelec convention) instead of the lowest N
+    eigenvalues overall. If the current (partially-grown) subbasis doesn't
+    yet have enough orbitals of some irrep to hold its target occupation,
+    each missing slot adds SYMMETRY_SHORTFALL_PENALTY -- this makes the
+    greedy search prioritise adding shells of an under-represented irrep
+    first, and degrades smoothly to the ordinary energy sum once every
+    irrep has enough capacity.
+
+    Each restricted (RHF-like) spatial orbital holds 2 electrons, so its
+    energy and shortfall-penalty contributions are weighted by 2 -- the
+    same convention as the plain (non-symmetry-aware) restricted 'enocc'
+    branch above (`2 * np.sum(epsilon_i[:nocc[0]])`). Unrestricted spin
+    channels are weighted by 1, one electron per occupied spin-orbital.
+    """
+    total = 0.0
+    for irname, target in irrep_nelec.items():
+        spin_targets = [(None, target // 2)] if restricted else \
+            [(0, target[0]), (1, target[1])]
+        for spin, n_need in spin_targets:
+            if n_need == 0:
+                continue
+            weight = 2 if spin is None else 1
+            e_ir = epsilon_i[orbsym == irname] if spin is None \
+                else epsilon_i[spin][orbsym == irname]
+            e_ir = np.sort(np.real(e_ir))
+            n_avail = e_ir.size
+            n_take = min(n_avail, n_need)
+            if n_take > 0:
+                total += weight * np.sum(e_ir[:n_take])
+            if n_avail < n_need:
+                total += weight * SYMMETRY_SHORTFALL_PENALTY * (n_need - n_avail)
+    return total
 
 
 def linked_shell_idx(smask: np.ndarray) -> np.ndarray:
@@ -1214,6 +1351,8 @@ def find_subspace(
     initialize_by_projection:   bool            = True,
     spherical_average:          bool            = False,
     abd_Q_tol:                  float           = .5,
+    symmetry_aware:             bool            = False,
+    irrep_nelec:                dict | None     = None,
     ) -> np.ndarray:
     r"""Looks for a Fock matrix subspace that approximately solves the
     Roothaan equation FC=SCE below a convergence of conv_tol.
@@ -1280,6 +1419,20 @@ def find_subspace(
             The atomic block decomposition charge tolerance, i.e. how much
             of the charge of the molecule the minimal basis is allowed to
             not account for. Optional, default 0.5.
+        symmetry_aware : bool
+            Optional feature, off by default. When True, the search
+            diagonalizes trial Fock matrices block-by-irrep and targets
+            `irrep_nelec`'s per-irrep occupation instead of the lowest N
+            eigenvalues overall (see expand_mask/symmetrized_eig). Requires
+            `mol.symmetry` truthy, `mol.groupname != 'C1'`, `irrep_nelec`
+            given, `get_smask=True` and `link_shells=True` -- a partial,
+            unlinked mask is not guaranteed to stay symmetry-closed, which
+            block-by-irrep diagonalization depends on. Default False:
+            behaviour is byte-identical to before this option existed.
+        irrep_nelec : dict | None
+            Target occupation per irrep name (pyscf mf.irrep_nelec format,
+            e.g. from scf_obj.get_irrep_nelec() on the converged reference
+            full-basis SCF). Required when `symmetry_aware=True`.
 
     Returns:
         1D boolean ndarray. A mask with selected function indices set to
@@ -1287,6 +1440,27 @@ def find_subspace(
         data as described in Args section. Shell mask is returned
         instead of function mask if get_smask is True.
     """
+    if symmetry_aware:
+        if not (mol.symmetry and mol.groupname != 'C1'):
+            raise RuntimeError(
+                "find_subspace(symmetry_aware=True) requires mol.symmetry "
+                "to be enabled with a non-C1 point group.")
+        if irrep_nelec is None:
+            raise RuntimeError(
+                "find_subspace(symmetry_aware=True) requires irrep_nelec "
+                "(the target per-irrep occupation) to be provided.")
+        if not get_smask:
+            raise RuntimeError(
+                "find_subspace(symmetry_aware=True) requires get_smask=True: "
+                "a per-function mask cannot be guaranteed symmetry-closed.")
+        if not link_shells:
+            raise RuntimeError(
+                "find_subspace(symmetry_aware=True) requires link_shells=True: "
+                "a mask that toggles individual symmetry-equivalent atoms' "
+                "shells independently is not guaranteed to stay "
+                "symmetry-closed, which block-by-irrep diagonalization "
+                "depends on.")
+
     if verbose:
         print('Running find_subspace for mol ', mol.atom)
     scf_obj_copy = scf_obj.copy()
@@ -1336,11 +1510,22 @@ def find_subspace(
         sub_hcore = scf_obj_copy.hf.get_hcore(mol)[mask_init_idx, mask_init_idx]
     elif variant == 'elden':
         _, Cfull = eig(F, S)
-    e_sub, Csub = eig(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
+
+    orbsym = None
+    if symmetry_aware:
+        sub_mol = create_subbasis_mol(fullbasis_mol, smask)
+        e_sub, Csub, orbsym_id = symmetrized_eig(
+            mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask),
+            sub_mol.symm_orb, sub_mol.irrep_id)
+        id_to_name = dict(zip(sub_mol.irrep_id, sub_mol.irrep_name))
+        orbsym = np.asarray([id_to_name[i] for i in orbsym_id])
+    else:
+        e_sub, Csub = eig(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
 
     previous_sum = get_iteration_criteria_value(
         variant, epsilon_i=e_sub, nocc=nocc, sub_hcore=sub_hcore,
-        Csub=Csub, Cfull=Cfull, ovlp=S[:, mask])
+        Csub=Csub, Cfull=Cfull, ovlp=S[:, mask],
+        irrep_nelec=irrep_nelec if symmetry_aware else None, orbsym=orbsym)
     
     basis_initialized = False
     if return_mask_history:
@@ -1375,6 +1560,8 @@ def find_subspace(
             Cfull=scf_obj_copy.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
             nfunc_normalisation=nfunc_normalisation,
+            mol=fullbasis_mol if symmetry_aware else None,
+            irrep_nelec=irrep_nelec if symmetry_aware else None,
         )
 
         if not basis_initialized:
@@ -1421,6 +1608,8 @@ def expand_mask(
     Cfull:                  np.ndarray | None   = None,
     link_shells:            bool                = True,
     nfunc_normalisation:    bool                = True,
+    mol:                    gto.MoleBase | None = None,
+    irrep_nelec:            dict | None         = None,
     ) -> tuple[np.ndarray, float, float, int, np.ndarray | None]:
     r"""Expands the current mask by either one function or one shell
     based on smask.
@@ -1467,6 +1656,22 @@ def expand_mask(
         grid_level : int
             predefined integration grid levels, 0-9
             (0 very sparse, 9 very dense). Optional, default is 3.
+        mol : MoleBase | None
+            Optional. When given together with `irrep_nelec`, every trial
+            (and the current) masked Fock/overlap matrix is diagonalized
+            block-by-irrep (symmetrized_eig) instead of with the plain,
+            symmetry-blind adb.eig, and the 'enocc' criterion targets
+            `irrep_nelec`'s per-irrep occupation instead of the lowest N
+            eigenvalues overall. Requires `smask` (shell mode) and
+            `mol.symmetry` truthy. Must be the *shell-separated* mol whose
+            shells `smask`/`mask` index into (i.e. what find_subspace calls
+            `fullbasis_mol`, not necessarily its own `mol` argument) -- it
+            is passed straight to create_subbasis_mol to build each trial's
+            symmetry-adapted basis. Default None: behaviour is identical to
+            before this option existed.
+        irrep_nelec : dict | None
+            Optional. Target occupation per irrep name, pyscf
+            mf.irrep_nelec format. Must be given together with `mol`.
 
     Returns:
         The new mask (boolean ndarray), the current difference in
@@ -1474,18 +1679,38 @@ def expand_mask(
         orbitals), shell mask if smask is provided.
     """
     restricted = (len(F.shape) == 2)
+    symmetry_aware = mol is not None and irrep_nelec is not None
+    if symmetry_aware and smask is None:
+        raise RuntimeError(
+            "expand_mask's symmetry-aware mode (mol/irrep_nelec given) "
+            "requires shell mode (smask must not be None); a per-function "
+            "mask cannot be guaranteed symmetry-closed.")
+
+    def _eig(maskedF, maskedS, test_smask):
+        """Plain adb.eig, or symmetrized_eig + name-tagged orbsym when
+        symmetry_aware."""
+        if not symmetry_aware:
+            return eig(maskedF, maskedS), None
+        sub_mol = create_subbasis_mol(mol, test_smask)
+        evals, coeffs, orbsym_id = symmetrized_eig(
+            maskedF, maskedS, sub_mol.symm_orb, sub_mol.irrep_id)
+        id_to_name = dict(zip(sub_mol.irrep_id, sub_mol.irrep_name))
+        orbsym = np.asarray([id_to_name[i] for i in orbsym_id])
+        return (evals, coeffs), orbsym
+
     maskedF = mask_matrix(F, mask, restricted)
     maskedS = mask_matrix(S, mask)
-    evals, coeffs = eig(maskedF, maskedS)
+    (evals, coeffs), orbsym = _eig(maskedF, maskedS, smask)
     last_sum = 0.0
     if Cfull is None and variant == 'elden':
         _, Cfull = eig(F, S)
     last_sum = get_iteration_criteria_value(
         variant, epsilon_i=evals, nocc=nocc,
         sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-        Cfull=Cfull, ovlp=S[:, mask])
+        Cfull=Cfull, ovlp=S[:, mask],
+        irrep_nelec=irrep_nelec, orbsym=orbsym)
 
-    test_sums = []    
+    test_sums = []
     if smask is None:
         for i, m in enumerate(mask):
             if m:
@@ -1525,8 +1750,8 @@ def expand_mask(
 
             maskedF = mask_matrix(F, test_mask, restricted)
             maskedS = mask_matrix(S, test_mask)
-            evals, coeffs = eig(maskedF, maskedS)
-            
+            (evals, coeffs), test_orbsym = _eig(maskedF, maskedS, test_smask)
+
             func_keys = [shell[3] for shell in submask[:,3]]
             nfuncs = np.sum(itemgetter(*func_keys)(NFUNCS))
             test_sums.append(
@@ -1534,7 +1759,8 @@ def expand_mask(
                 get_iteration_criteria_value(
                     variant, epsilon_i=evals, nocc=nocc,
                     sub_hcore=mask_matrix(hcore, mask), Csub=coeffs,
-                    Cfull=Cfull, ovlp=S[:, test_mask]),
+                    Cfull=Cfull, ovlp=S[:, test_mask],
+                    irrep_nelec=irrep_nelec, orbsym=test_orbsym),
                 nfuncs))
 
     if nfunc_normalisation:
