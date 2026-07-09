@@ -163,6 +163,7 @@ def run_abs(
     q_tol=1.0,
     ODIR="output",
     debug=False,
+    symmetry_aware_search=False,
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -364,6 +365,12 @@ def run_abs(
                         f.write("{:<15s}".format("-"))
 
                     start = time()
+                    symmetry_aware_kwargs = {}
+                    if symmetry_aware_search:
+                        symmetry_aware_kwargs = dict(
+                            symmetry_aware=True,
+                            irrep_nelec=irrep_nelec,
+                        )
                     smaskhistory = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
@@ -373,7 +380,8 @@ def run_abs(
                         nfunc_normalisation=nfunc_normalisation,
                         return_mask_history=True,
                         abd_initialization=abd_init,
-                        abd_Q_tol=q_tol
+                        abd_Q_tol=q_tol,
+                        **symmetry_aware_kwargs,
                     )
                     data_sbys = adb.mask_analysis(
                         smaskhistory, shellsep_mol, myhf,
@@ -868,6 +876,17 @@ if __name__ == "__main__":
         default=False,
         help="Turn on debugging. Default is False.",
     )
+    parser.add_argument(
+        "--symmetry_aware_search",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Optional feature, off by default. Make the adaptive-basis "
+             "shell search (find_subspace) target the reference SCF's "
+             "per-irrep occupation instead of the plain, symmetry-blind "
+             "lowest-N-by-energy criterion it uses otherwise. Requires "
+             "--point_group_file/--symmetry (a non-C1 point group) and "
+             "--linkshells (the default).",
+    )
 
     args = parser.parse_args()
 
@@ -894,6 +913,7 @@ if __name__ == "__main__":
     symm = args.symmetry
     odir = args.output_dir
     debug = args.debug
+    symmetry_aware_search = args.symmetry_aware_search
     bs = []
     bstemp = []
 
@@ -946,6 +966,7 @@ if __name__ == "__main__":
                 q_tol = q_tol,
                 ODIR = odir,
                 debug = debug,
+                symmetry_aware_search = symmetry_aware_search,
                 )
         case 'occs':
             run_occupations(
