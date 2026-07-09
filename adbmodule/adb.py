@@ -451,8 +451,8 @@ def get_iteration_criteria_value(
         case 'enocc':
             if epsilon_i is None or nocc is None:
                 raise ValueError("Energies 'epsilon_i' or occupations 'nocc' not provided.")
-            RHF = (len(np.asarray(epsilon_i).shape) == 1)
-            if RHF:
+            restricted = (len(np.asarray(epsilon_i).shape) == 1)
+            if restricted:
                 criteria = np.sum(epsilon_i[:nocc[0]])
             else:
                 criteria  = np.sum(epsilon_i[0,:nocc[0]])
@@ -580,11 +580,7 @@ def get_sub_scf_attributes(
         The SCF energy, sum of occupied orbital energies of the
         subbasis, the MO coefficient matrix of the subbasis.
     """
-    RHF = (len(fock.shape) == 2)
-    # if RHF:
-    #     mf = mol.RHF()
-    # else:
-    #     mf = mol.UHF()
+    restricted = (len(fock.shape) == 2)
     mf = mol.HF()
     mf = mf.apply(scf.addons.remove_linear_dep_)
     if dft:
@@ -602,7 +598,7 @@ def get_sub_scf_attributes(
 
     scf_energy = mf.e_tot
     # sum over occupied orbital energies
-    if RHF:
+    if restricted:
         nocc_sb = np.sum(mf.mo_occ > 0)
         scf_orbital_energy = sum(np.sort(mf.mo_energy)[:nocc_sb])
     else:
@@ -685,8 +681,8 @@ def get_q_sqrd(
         ovlp:  np.ndarray,
         nocc:  np.ndarray  ) -> float:
     """Calculates the square of the projection Q"""
-    RHF = (len(Cfull.shape) == 2)
-    if RHF:
+    restricted = (len(Cfull.shape) == 2)
+    if restricted:
         Q = Cfull[:, :nocc[0]].T @ ovlp @ Csub[:, :nocc[0]]
         return 2.0 * np.real(np.sum(np.sum(Q**2)))
     else:
@@ -728,7 +724,7 @@ def mask_matrix(
             (overlap matrix will only have one matrix in UHF)
         mask : array
             The basis mask.
-        RHF : bool
+        is_restricted : bool
             Whether using restricted or unrestricted HF. Optional,
             default is True.
 
@@ -1477,8 +1473,8 @@ def expand_mask(
         eigenvalue sums and the current sum (energy sum of occupied
         orbitals), shell mask if smask is provided.
     """
-    RHF = (len(F.shape) == 2)
-    maskedF = mask_matrix(F, mask, RHF)
+    restricted = (len(F.shape) == 2)
+    maskedF = mask_matrix(F, mask, restricted)
     maskedS = mask_matrix(S, mask)
     evals, coeffs = eig(maskedF, maskedS)
     last_sum = 0.0
@@ -1497,7 +1493,7 @@ def expand_mask(
 
             test_mask = copy.deepcopy(mask)
             test_mask[i] = True
-            maskedF = mask_matrix(F, test_mask, RHF)
+            maskedF = mask_matrix(F, test_mask, restricted)
             maskedS = mask_matrix(S, test_mask)
             evals, coeffs = eig(maskedF, maskedS)
 
@@ -1527,7 +1523,7 @@ def expand_mask(
             test_smask[sidx] = submask
             test_mask = smask_to_mask(test_smask)
 
-            maskedF = mask_matrix(F, test_mask, RHF)
+            maskedF = mask_matrix(F, test_mask, restricted)
             maskedS = mask_matrix(S, test_mask)
             evals, coeffs = eig(maskedF, maskedS)
             
