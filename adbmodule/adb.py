@@ -23,6 +23,7 @@ import atomic_block_util
 import copy
 import sys
 import re
+from calculations import eig, symmetrized_eig
 
 
 VARIANTS = [
@@ -66,111 +67,6 @@ def dual_basis_energy_correction(
     else:
         dE = np.trace(dP @ F_full)
     return np.real(dE), scf_obj.e_tot
-
-
-def eig(
-        h: np.ndarray,
-        s: np.ndarray
-        ) -> tuple[np.ndarray, np.ndarray]:
-    """Wrapper for eigh, calculates orthogonalisation for RHF and UHF.
-    """
-    if len(np.asarray(h).shape) == 3:
-        ea, ca = canonical_orth(h[0], s)
-        eb, cb = canonical_orth(h[1], s)
-        return np.asarray([ea, eb]), np.asarray([ca, cb])
-    else:
-        return canonical_orth(h, s)
-
-
-def canonical_orth(
-        h: np.ndarray | tuple[np.ndarray, np.ndarray],
-        s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Modified canonical orthogonalisation.
-
-    Args:
-        h : ndarray
-            Fock matrix
-        s : ndarray
-            Overlap matrix
-        get_idx : bool
-            Whether to return the indices that sort the eigenvalues.
-            Default is False
-
-    Returns:
-        Sorted eigenvalues (ascending) and coefficients, if get_idx is
-        True the indices that sort the eigenvalues are also returned
-    """
-    x = canonical_orth_(s, 1e-8)
-    xhx = x.conj().T @ h @ x
-    e, c = linalg.eig(xhx)
-    c = x @ c
-    idx = np.argsort(e)
-    return e[idx], c[:,idx]
-
-
-def symmetrized_eig(
-        h:          np.ndarray,
-        s:          np.ndarray,
-        symm_orb:   list,
-        irrep_id:   list,
-        ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Block-diagonalize (h, s) by irrep and solve each block with
-    canonical_orth.
-
-    This mirrors the structure of pyscf.scf.hf_symm.eig (symmetrize h/s
-    into per-irrep blocks via pyscf.symm.symmetrize_matrix, one
-    generalized eigenproblem per irrep) but solves each block with adb's
-    own canonical_orth instead of plain scipy.linalg.eigh, since the
-    (masked) sub-Fock matrices this is used on are frequently
-    near-singular -- the same reason adb.eig exists instead of calling
-    scipy directly.
-
-    Args:
-        h : ndarray
-            Fock/Hamiltonian matrix. 2D for RHF. For UHF, pass a stacked
-            (2, nao, nao) array (alpha, beta) exactly like adb.eig -- the
-            irrep block structure is spin-independent (it only depends on
-            symm_orb/s), so both spins share one `orbsym`.
-        s : ndarray
-            Overlap matrix, same AO dimension as h (spin-independent).
-        symm_orb : list of ndarray
-            Symmetry-adapted basis coefficients, one (nao, n_ir) array per
-            irrep, e.g. mol.symm_orb / subbasis_mol.symm_orb. Must be
-            expressed in the same AO basis/ordering as h and s.
-        irrep_id : list of int
-            Irrep id for each entry of symm_orb, e.g. mol.irrep_id.
-
-    Returns:
-        e : ndarray
-            Eigenvalues, grouped by irrep block (not globally sorted --
-            matches pyscf's own symmetric-eig convention). Shape (2, nmo)
-            for UHF input, (nmo,) for RHF input.
-        c : ndarray
-            Eigenvectors, back-transformed to the AO basis of h/s. Shape
-            (2, nao, nmo) for UHF input, (nao, nmo) for RHF input.
-        orbsym : ndarray
-            Irrep id for each column of e/c along its last axis, shape
-            (nmo,) -- shared between spins for UHF input.
-    """
-    def _block_eig(h2d):
-        hs = symm.symmetrize_matrix(h2d, symm_orb)
-        ss = symm.symmetrize_matrix(s, symm_orb)
-        es, cs, osym = [], [], []
-        for ir in range(len(symm_orb)):
-            if symm_orb[ir].shape[1] == 0:
-                continue
-            e_ir, c_ir = canonical_orth(hs[ir], ss[ir])
-            es.append(e_ir)
-            cs.append(symm_orb[ir] @ c_ir)
-            osym.append(np.full(e_ir.size, irrep_id[ir]))
-        return np.hstack(es), np.hstack(cs), np.hstack(osym)
-
-    if len(np.asarray(h).shape) == 3:
-        ea, ca, orbsym = _block_eig(h[0])
-        eb, cb, _ = _block_eig(h[1])
-        return np.asarray([ea, eb]), np.asarray([ca, cb]), orbsym
-    else:
-        return _block_eig(h)
 
 
 def extract_basis(
