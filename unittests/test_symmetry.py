@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 
 import adb
-
+import CONSTANTS
 
 # ---------------------------------------------------------------------------
 # adb.symmetrized_eig
@@ -67,7 +67,7 @@ class TestEnoccByIrrep:
             'enocc', epsilon_i=epsilon_i, nocc=(3, 3),
             irrep_nelec=irrep_nelec, orbsym=orbsym)
 
-        expected = 2 * (-2.0 + -1.0) + 2 * adb.SYMMETRY_SHORTFALL_PENALTY
+        expected = 2 * (-2.0 + -1.0) + 2 * CONSTANTS.SYMMETRY_SHORTFALL_PENALTY
         assert val == pytest.approx(expected)
 
     def test_unrestricted_uses_per_spin_targets(self):
