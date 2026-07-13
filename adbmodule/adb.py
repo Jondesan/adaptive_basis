@@ -7,13 +7,14 @@ from pyscf.scf.addons import project_dm_nr2nr
 from pyscf import gto, scf, symm
 from warnings import warn
 from operator import itemgetter
-import atomic_block_util
+# import atomic_block_util
 import copy
 import sys
-from calculations import eig, symmetrized_eig, get_iteration_criteria_value, get_q_sqrd, dual_basis_energy_correction, diagonalize_masked
-from maskutil import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label, mask_matrix
-from molutil import create_shell_separated_mol, basis_functions_per_atom
+from calculations import eig, symmetrized_eig, get_iteration_criteria_value, get_q_sqrd, dual_basis_energy_correction, diagonalize_masked, spherical_average
+from maskutil import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label, mask_matrix, link_shells
+from molutil import create_shell_separated_mol, basis_functions_per_atom, funcs_on_shell, get_array_of_angular_momenta_and_atom_id
 from basisutil import extract_basis
+from ioutil import print_data_header, print_data, function_labels_from_mask
 from CONSTANTS import NFUNCS, EXPAND_MASK_EPS, ELEMENTS
 
 
@@ -182,102 +183,6 @@ def get_occupied_orbitals_from_scf(mf) -> list:
                 if occ > 0:
                     occupied.append((float(e), lbl))
     return occupied
-
-
-def write_orbital_history(
-        orbital_history:    list,
-        fn:                 str,
-        molname:            str = "",
-        basisname:          str = "",
-        ) -> None:
-    """Write a find_subspace(track_orbitals=True) orbital_history to a CSV
-    file (one row per occupied orbital per ADB cycle): nfunc,energy,irrep.
-    `fn` gets '.csv' appended. `irrep` is left blank for symmetry-blind
-    entries (irrep_nelec/orbsym not given to find_subspace).
-    """
-    with open(fn + ".csv", "w") as f:
-        if molname or basisname:
-            f.write(f"# molecule={molname} basis={basisname}\n")
-        f.write("nfunc,energy,irrep\n")
-        for entry in orbital_history:
-            nfunc = entry["nfunc"]
-            for energy, irrep in entry["orbitals"]:
-                f.write(f"{nfunc},{energy:.12f},{irrep if irrep is not None else ''}\n")
-
-
-def print_data_header() -> None:
-    print(
-            f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}' +\
-            f'  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
-        )
-
-
-def print_data(
-    mask:               np.ndarray,
-    criteria_value:     float,
-    diff:               float,
-    ao_or_shell_label:  str,
-    E_scf:              float | str = "-",
-    Qsqrd:              float | str = "-",
-    print_header:       bool        = False ) -> None:
-    """Data printout function
-    
-    """
-
-    if print_header:
-        print_data_header()
-
-    if E_scf is None:
-        E_scf = "-"
-    if Qsqrd is None:
-        Qsqrd = "-"
-
-    print(f"{sum(mask):10d}", end="")
-    print(f" {ao_or_shell_label:>13s}", end="")
-    print(f" {criteria_value:16.9f}", end="")
-    print(f'  {diff:{">15s" if isinstance(diff, str) else "15.9f"}}', end="")
-    print(f'  {E_scf:{">15s" if isinstance(E_scf, str) else "15.9f"}}', end="")
-    print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "18.12f"}}')
-
-
-def spherical_average(mat: np.ndarray, ml: np.ndarray) -> np.ndarray:
-    """Calculate the spherical average of a matrix.
-
-    Args:
-        mat : ndarray
-            The (Fock) matrix which will be spherically averaged.
-        ml : ndarray | arraylike
-            An array with the numbers of functions on the shells.
-    """
-
-    mat_copy = mat.copy()
-    restricted = (len(mat_copy.shape) == 2)
-    if restricted:
-        return sph_avg(mat_copy, ml)
-    mat_out = np.ndarray(mat_copy.shape)
-    mat_out[0] = sph_avg(mat_copy[0], ml)
-    mat_out[1] = sph_avg(mat_copy[1], ml)
-    return mat_out
-
-
-def sph_avg(mat: np.ndarray, ml: np.ndarray) -> np.ndarray:
-    mat_copy = mat.copy()
-    offset = 0
-    for nfunc in ml:
-        if nfunc == 1:
-            offset += nfunc
-            continue
-        shell_mat = mat_copy[offset:offset+nfunc, offset:offset+nfunc]
-        # Extract diagonal of the shell block
-        diag = np.diag(shell_mat)
-        avg = np.mean(diag)
-        shell_mat = np.diag([avg]*diag.shape[0])
-
-        for i in range(nfunc):
-            mat_copy[offset+i,offset:offset+nfunc] = shell_mat[i,:]
-
-        offset += nfunc
-    return mat_copy
 
 
 def atomic_block_minimal_basis(
@@ -688,6 +593,83 @@ def pseudominimal_basis_nearest_neighbor(
     return pseudominimal_basis_mask
 
 
+def find_projected_minimal_basis_mask(
+        mol,
+    ):
+    from pyscf.gto.mole import intor_cross, aoslice_by_atom
+    try:
+        mol_sto3g = Mole(
+            atom = mol.atom,
+            basis = 'sto3g',
+            ecp = mol.ecp,
+            spin = mol.spin,
+            charge = mol.charge,
+            cart = mol.cart,
+            unit = mol.unit,
+            symmetry = mol.symmetry,
+        ).build()
+    except:
+        mol_sto3g = Mole(
+            atom = mol.atom,
+            basis = 'sto3g',
+            spin = mol.spin,
+            charge = mol.charge,
+            cart = mol.cart,
+            unit = mol.unit,
+            symmetry = mol.symmetry,
+        ).build()
+    mask = np.zeros(mol.nao_nr(), dtype=bool)    
+    s21 = intor_cross('int1e_ovlp', mol, mol_sto3g)
+
+    # Find the AO-id offsets of the atoms
+    atom_offsets = aoslice_by_atom(mol)[:,2]
+
+    # Generate arrays with the angular momentum l and atom-id
+    # for all functions. Element n corresponds the l and atom-id
+    # of the n:th basis function
+    sto3g_angls = get_array_of_angular_momenta_and_atom_id(mol_sto3g)
+    sto3g_aid = sto3g_angls[:, 1]
+    sto3g_angls = sto3g_angls[:, 0]
+
+    prev_angl = None
+    prev_aid = None
+    shell_offset = 0
+
+    ao_labels = mol.ao_labels()
+    for (ovlp_col, angl, atom_id) in zip(s21.T, sto3g_angls, sto3g_aid):
+        # Count functions of angular momentum angl in large basis
+        # for the current atom
+        nfunc_angl = len(list(filter(
+            lambda x: x[0] == atom_id and x[1] == angl, mol._bas)))
+        # Remember to multiply by the number of allowed
+        # magnetic quantum numbers
+        nfunc_angl *= funcs_on_shell(angl, mol.cart)
+
+        # Initialise the shell mask if first round, new shell or new atom
+        if prev_angl != angl or prev_angl is None or prev_aid != atom_id or prev_aid is None:
+            prev_aid = atom_id
+            prev_angl = angl
+
+        # Count the offset of the current shell
+        shell_offset = atom_offsets[atom_id]
+        # Make sure to multiply by the number of allowed magnetic quant. nums
+        angls_atom = [x[1] for x in list(filter(lambda x: x[0] == atom_id and x[1] < angl, mol._bas))]
+        shell_offset += sum([funcs_on_shell(angll) for angll in angls_atom])
+        
+        # This guarantees no function will be chosen twice by removing already
+        # selected functions from the pool of available ones
+        ovlp_col[mask] = 0.0
+
+        idx = np.argmax(np.abs(ovlp_col[shell_offset:shell_offset + nfunc_angl]))
+        mask[shell_offset + idx] = 1
+
+    mask = link_shells(mol, mask)
+    if np.sum(mask) != mol_sto3g.nao_nr():
+        raise RuntimeError(f"Number of functions in the projected minimal basis [{np.sum(mask)}] does not match the number of functions in the actual minimal basis [{mol_sto3g.nao_nr()}]!")
+
+    return mask
+
+
 def find_subspace(
     F:                          np.ndarray,
     S:                          np.ndarray,
@@ -860,7 +842,7 @@ def find_subspace(
         mask_init_idx = np.where(mask)[0]
     elif initialize_by_projection:
         print("--- Initializing the dual basis by minimal basis projection ---")
-        mask = atomic_block_util.find_projected_minimal_basis_mask(mol)
+        mask = find_projected_minimal_basis_mask(mol)
         mask_init_idx = np.where(mask)[0]
     else:
         mask_init_idx = [np.argmin(Fii)]
@@ -1333,7 +1315,7 @@ def mask_analysis(
         else:
             minimal_mask = mask_history_init[-1][0]
         print(np.sum(minimal_mask))
-        print(atomic_block_util.function_labels_from_mask(minimal_mask, mol))
+        print(function_labels_from_mask(minimal_mask, mol))
         
         print('\nNumber of toggled functions:', np.sum(last_mask))
         print(20*'#' + ' INITIALIZATION END ' + 61*'#')
