@@ -8,6 +8,7 @@ import CONSTANTS
 import calculations
 import molutil
 import maskutil
+import ioutil
 import pyscf
 
 # ---------------------------------------------------------------------------
@@ -411,7 +412,7 @@ class TestTrackOrbitals:
 
 
 # ---------------------------------------------------------------------------
-# adb.write_orbital_history
+# ioutil.write_orbital_history
 # ---------------------------------------------------------------------------
 
 class TestWriteOrbitalHistory:
@@ -422,7 +423,7 @@ class TestWriteOrbitalHistory:
             {"nfunc": 8, "orbitals": [(-1.6, "A1")]},
         ]
         fn = str(tmp_path / "hist")
-        adb.write_orbital_history(orbital_history, fn, molname="h2o", basisname="sto-3g")
+        ioutil.write_orbital_history(orbital_history, fn, molname="h2o", basisname="sto-3g")
 
         content = (tmp_path / "hist.csv").read_text().splitlines()
         assert content[0] == "# molecule=h2o basis=sto-3g"
