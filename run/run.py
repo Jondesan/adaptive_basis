@@ -164,6 +164,7 @@ def run_abs(
     ODIR="output",
     debug=False,
     symmetry_aware_search=False,
+    track_orbitals=False,
     ):
     """Run subbasis iteration for molecules in mol_list"""
 
@@ -371,7 +372,7 @@ def run_abs(
                             symmetry_aware=True,
                             irrep_nelec=irrep_nelec,
                         )
-                    smaskhistory = adb.find_subspace(
+                    find_subspace_result = adb.find_subspace(
                         F, S, mol, myhf,
                         conv_tol=conv_tol,
                         get_smask=True,
@@ -381,9 +382,17 @@ def run_abs(
                         return_mask_history=True,
                         abd_initialization=abd_init,
                         abd_Q_tol=q_tol,
+                        track_orbitals=track_orbitals,
                         **symmetry_aware_kwargs,
                     )
-                    data_sbys = adb.mask_analysis(
+                    if track_orbitals:
+                        smaskhistory, orbital_history = find_subspace_result
+                        adb.write_orbital_history(
+                            orbital_history, fn=f'{ODIR}/{fname}.orbitals',
+                            molname=molname, basisname=bsname)
+                    else:
+                        smaskhistory = find_subspace_result
+                    mask_analysis_result = adb.mask_analysis(
                         smaskhistory, shellsep_mol, myhf,
                         F, S, dft = dft, xc = xc, grid_level = grid_level,
                         molfname = molfilename,
@@ -392,7 +401,15 @@ def run_abs(
                         calculate_correction = calculate_DB_correction,
                         irrep_nelec = irrep_nelec,
                         debug = debug,
+                        track_orbitals = track_orbitals,
                     )
+                    if track_orbitals:
+                        data_sbys, scf_orbital_history = mask_analysis_result
+                        adb.write_orbital_history(
+                            scf_orbital_history, fn=f'{ODIR}/{fname}.scf_orbitals',
+                            molname=molname, basisname=bsname)
+                    else:
+                        data_sbys = mask_analysis_result
                     end = time()
 
                     f.write(f"{end-start:15.9e}\n\n")
@@ -887,6 +904,15 @@ if __name__ == "__main__":
              "--point_group_file/--symmetry (a non-C1 point group) and "
              "--linkshells (the default).",
     )
+    parser.add_argument(
+        "--track_orbitals",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Optional feature, off by default. Record the occupied "
+             "orbital energies and their symmetry labels (irrep=empty if "
+             "--symmetry_aware_search is off) at every ADB cycle, and save "
+             "them to '<output_dir>/<fname>.orbitals.csv'.",
+    )
 
     args = parser.parse_args()
 
@@ -914,6 +940,7 @@ if __name__ == "__main__":
     odir = args.output_dir
     debug = args.debug
     symmetry_aware_search = args.symmetry_aware_search
+    track_orbitals = args.track_orbitals
     bs = []
     bstemp = []
 
@@ -967,6 +994,7 @@ if __name__ == "__main__":
                 ODIR = odir,
                 debug = debug,
                 symmetry_aware_search = symmetry_aware_search,
+                track_orbitals = track_orbitals,
                 )
         case 'occs':
             run_occupations(

@@ -27,6 +27,14 @@ from calculations import eig, symmetrized_eig, get_iteration_criteria_value, get
 from mask import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label
 from CONSTANTS import NFUNCS
 
+# Tolerance used by expand_mask to detect a *genuinely* tied/non-improving
+# best candidate (as opposed to conv_tol, which governs how small a real
+# improvement has to be before find_subspace decides to stop). Deliberately
+# far tighter than any realistic conv_tol -- this only catches exact (up to
+# floating-point noise) ties, e.g. every remaining candidate being provably
+# irrelevant to an already-satisfied symmetry-aware target.
+EXPAND_MASK_EPS = 1e-12
+
 
 def dual_basis_energy_correction(
     scf_obj: scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
@@ -339,8 +347,173 @@ def create_subbasis_mol(
         ecp = ecp_bas, symmetry = mol.symmetry
     )
     subbasis_mol.build()
-    
+
     return subbasis_mol
+
+
+def diagonalize_masked(
+        maskedF:    np.ndarray,
+        maskedS:    np.ndarray,
+        mol:        gto.MoleBase | None = None,
+        smask:      np.ndarray | None   = None,
+        ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    """Diagonalize an already-masked (Fock, overlap) pair.
+
+    Plain adb.eig (symmetry-blind) when `mol` is None. When `mol` is given
+    (the shell-separated mol whose shells `smask` indexes into -- see
+    expand_mask's docstring), builds a fresh subbasis Mole via
+    create_subbasis_mol(mol, smask) and diagonalizes block-by-irrep with
+    symmetrized_eig instead, returning a name-tagged `orbsym` array.
+
+    Shared by expand_mask's symmetry-aware branch, find_subspace's
+    symmetry-aware pre-loop baseline, and find_subspace's optional
+    track_orbitals bookkeeping -- pulled out to a top-level function so
+    those three call sites diagonalize a masked subbasis identically
+    instead of maintaining three copies of the same branch.
+
+    Returns:
+        evals, coeffs, orbsym (None when mol is None).
+    """
+    if mol is None:
+        evals, coeffs = eig(maskedF, maskedS)
+        return evals, coeffs, None
+    sub_mol = create_subbasis_mol(mol, smask)
+    evals, coeffs, orbsym_id = symmetrized_eig(
+        maskedF, maskedS, sub_mol.symm_orb, sub_mol.irrep_id)
+    id_to_name = dict(zip(sub_mol.irrep_id, sub_mol.irrep_name))
+    orbsym = np.asarray([id_to_name[i] for i in orbsym_id])
+    return evals, coeffs, orbsym
+
+
+def get_occupied_orbitals(
+        epsilon_i:      np.ndarray,
+        nocc:           tuple,
+        irrep_nelec:    dict | None         = None,
+        orbsym:         np.ndarray | None   = None,
+        restricted:     bool                = True,
+        ) -> list:
+    """Extract the occupied orbital set implied by the same selection rule
+    get_iteration_criteria_value's 'enocc' branch (and _enocc_by_irrep)
+    use to compute their criterion sum -- but returning the individual
+    selected (energy, irrep) pairs instead of just their sum.
+
+    Symmetry-blind (irrep_nelec/orbsym not given): the lowest nocc[0]
+    (restricted) or nocc[0]/nocc[1] (unrestricted) eigenvalues overall.
+
+    Symmetry-aware (irrep_nelec/orbsym given): the lowest target-count
+    eigenvalues *within each irrep*, per pyscf's mf.irrep_nelec convention
+    (int per irrep for restricted, (n_alpha, n_beta) tuple for
+    unrestricted) -- mirroring _enocc_by_irrep's selection exactly, minus
+    its shortfall-penalty bookkeeping (irrelevant here: this is only ever
+    called on an already-accepted mask/step, where by construction every
+    targeted irrep has enough capacity).
+
+    Args:
+        epsilon_i : ndarray
+            Orbital energies, as returned by adb.eig/symmetrized_eig.
+            Shape (nmo,) for restricted, (2, nmo) for unrestricted.
+        nocc : tuple
+            (n_alpha, n_beta) occupied counts, used only when irrep_nelec
+            is None.
+        irrep_nelec : dict | None
+            Target occupation per irrep name (pyscf mf.irrep_nelec
+            format). When given, `orbsym` must be given too.
+        orbsym : ndarray | None
+            Irrep name (string) for each entry along epsilon_i's last
+            axis, as returned by diagonalize_masked/symmetrized_eig (after
+            translating irrep ids to names).
+        restricted : bool
+            Whether epsilon_i is restricted (2D h) or unrestricted-shaped.
+
+    Returns:
+        List of (energy, irrep_label) tuples, one per occupied orbital.
+        irrep_label is None throughout when irrep_nelec/orbsym are not
+        given (symmetry-blind case).
+    """
+    occupied = []
+    if irrep_nelec is not None:
+        if orbsym is None:
+            raise ValueError(
+                "'orbsym' must be provided together with 'irrep_nelec'.")
+        for irname, target in irrep_nelec.items():
+            spin_targets = [(None, target // 2)] if restricted else \
+                [(0, target[0]), (1, target[1])]
+            for spin, n_need in spin_targets:
+                if n_need == 0:
+                    continue
+                e_ir = epsilon_i[orbsym == irname] if spin is None \
+                    else epsilon_i[spin][orbsym == irname]
+                idx = np.argsort(np.real(e_ir))[:n_need]
+                for e in np.real(e_ir)[idx]:
+                    occupied.append((float(e), irname))
+    elif restricted:
+        for e in epsilon_i[:nocc[0]]:
+            occupied.append((float(np.real(e)), None))
+    else:
+        for e in epsilon_i[0][:nocc[0]]:
+            occupied.append((float(np.real(e)), None))
+        for e in epsilon_i[1][:nocc[1]]:
+            occupied.append((float(np.real(e)), None))
+    return occupied
+
+
+def get_occupied_orbitals_from_scf(mf) -> list:
+    """Extract the occupied orbital energies and (if mf.mol.symmetry is
+    enabled) their symmetry labels from a converged pyscf SCF object.
+
+    Companion to get_occupied_orbitals: that one works from a raw
+    (epsilon_i, orbsym) pair produced during the ADB search itself, before
+    any SCF exists (a fixed guess Fock matrix, not self-consistent). This
+    one instead reads mo_energy/mo_occ/mo_coeff straight off a *converged*
+    mf object -- used by mask_analysis's track_orbitals to record the
+    genuinely self-consistent occupied-orbital spectrum for each subbasis,
+    as opposed to find_subspace/expand_mask's guess-Fock-matrix spectrum.
+
+    Returns a list of (energy, irrep_label) tuples, one per occupied MO.
+    irrep_label is None throughout when mf.mol.symmetry is off/C1.
+    """
+    mol = mf.mol
+    has_symmetry = bool(mol.symmetry) and mol.groupname != 'C1'
+    restricted = (np.asarray(mf.mo_occ, dtype=object).ndim == 1)
+
+    def _labels(mo_coeff):
+        if not has_symmetry:
+            return [None] * mo_coeff.shape[1]
+        return list(symm.label_orb_symm(mol, mol.irrep_name, mol.symm_orb, mo_coeff))
+
+    occupied = []
+    if restricted:
+        for e, occ, lbl in zip(mf.mo_energy, mf.mo_occ, _labels(mf.mo_coeff)):
+            if occ > 0:
+                occupied.append((float(e), lbl))
+    else:
+        for spin in (0, 1):
+            for e, occ, lbl in zip(
+                    mf.mo_energy[spin], mf.mo_occ[spin], _labels(mf.mo_coeff[spin])):
+                if occ > 0:
+                    occupied.append((float(e), lbl))
+    return occupied
+
+
+def write_orbital_history(
+        orbital_history:    list,
+        fn:                 str,
+        molname:            str = "",
+        basisname:          str = "",
+        ) -> None:
+    """Write a find_subspace(track_orbitals=True) orbital_history to a CSV
+    file (one row per occupied orbital per ADB cycle): nfunc,energy,irrep.
+    `fn` gets '.csv' appended. `irrep` is left blank for symmetry-blind
+    entries (irrep_nelec/orbsym not given to find_subspace).
+    """
+    with open(fn + ".csv", "w") as f:
+        if molname or basisname:
+            f.write(f"# molecule={molname} basis={basisname}\n")
+        f.write("nfunc,energy,irrep\n")
+        for entry in orbital_history:
+            nfunc = entry["nfunc"]
+            for energy, irrep in entry["orbitals"]:
+                f.write(f"{nfunc},{energy:.12f},{irrep if irrep is not None else ''}\n")
 
 
 def create_shell_separated_mol(
@@ -898,6 +1071,7 @@ def find_subspace(
     abd_Q_tol:                  float           = .5,
     symmetry_aware:             bool            = False,
     irrep_nelec:                dict | None     = None,
+    track_orbitals:             bool            = False,
     ) -> np.ndarray:
     r"""Looks for a Fock matrix subspace that approximately solves the
     Roothaan equation FC=SCE below a convergence of conv_tol.
@@ -978,12 +1152,32 @@ def find_subspace(
             Target occupation per irrep name (pyscf mf.irrep_nelec format,
             e.g. from scf_obj.get_irrep_nelec() on the converged reference
             full-basis SCF). Required when `symmetry_aware=True`.
+        track_orbitals : bool
+            Optional feature, off by default. When True, records the
+            occupied orbital energies and their symmetry labels (via
+            get_occupied_orbitals) at every accepted ADB cycle -- the
+            initial mask and every subsequent growth step, mirroring
+            return_mask_history's per-step bookkeeping. Symmetry labels
+            are only meaningful (non-None) when `symmetry_aware=True`; with
+            it False they're still recorded, just with irrep=None
+            throughout. When True, the return value becomes a 2-tuple
+            `(result, orbital_history)` instead of just `result` --
+            existing call sites that assign the return value to a single
+            variable are unaffected as long as they leave this at its
+            default. `orbital_history` is a list of
+            `{'nfunc': int, 'orbitals': [(energy, irrep_label), ...]}`
+            dicts, one per recorded cycle, saveable via
+            write_orbital_history. Default False: behaviour/return shape
+            identical to before this option existed.
 
     Returns:
         1D boolean ndarray. A mask with selected function indices set to
         True. If collect_data is True, an ndarray is also returned with
         data as described in Args section. Shell mask is returned
-        instead of function mask if get_smask is True.
+        instead of function mask if get_smask is True. If
+        `track_orbitals=True`, a `(result, orbital_history)` tuple is
+        returned instead of just `result` -- see the `track_orbitals` Args
+        entry above.
     """
     if symmetry_aware:
         if not (mol.symmetry and mol.groupname != 'C1'):
@@ -1030,6 +1224,7 @@ def find_subspace(
             verbose=verbose)
         mask_init_idx = np.where(mask)[0]
     elif initialize_by_projection:
+        print("--- Initializing the dual basis by minimal basis projection ---")
         mask = atomic_block_util.find_projected_minimal_basis_mask(mol)
         mask_init_idx = np.where(mask)[0]
     else:
@@ -1056,22 +1251,24 @@ def find_subspace(
     elif variant == 'elden':
         _, Cfull = eig(F, S)
 
-    orbsym = None
-    if symmetry_aware:
-        sub_mol = create_subbasis_mol(fullbasis_mol, smask)
-        e_sub, Csub, orbsym_id = symmetrized_eig(
-            mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask),
-            sub_mol.symm_orb, sub_mol.irrep_id)
-        id_to_name = dict(zip(sub_mol.irrep_id, sub_mol.irrep_name))
-        orbsym = np.asarray([id_to_name[i] for i in orbsym_id])
-    else:
-        e_sub, Csub = eig(mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask))
+    e_sub, Csub, orbsym = diagonalize_masked(
+        mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask),
+        fullbasis_mol if symmetry_aware else None, smask)
 
     previous_sum = get_iteration_criteria_value(
         variant, epsilon_i=e_sub, nocc=nocc,
         Csub=Csub, Cfull=Cfull, ovlp=S[:, mask],
         irrep_nelec=irrep_nelec if symmetry_aware else None, orbsym=orbsym)
-    
+
+    orbital_history = None
+    if track_orbitals:
+        orbital_history = [{
+            'nfunc': int(np.sum(mask)),
+            'orbitals': get_occupied_orbitals(
+                e_sub, nocc, irrep_nelec if symmetry_aware else None, orbsym,
+                restricted=is_restricted),
+        }]
+
     basis_initialized = False
     if return_mask_history:
         mask_history = []
@@ -1109,10 +1306,34 @@ def find_subspace(
             irrep_nelec=irrep_nelec if symmetry_aware else None,
         )
 
+        if n_added == 0:
+            # expand_mask found no remaining candidate that genuinely
+            # improves the criterion (see its docstring/EXPAND_MASK_EPS) --
+            # the mask above is unchanged, and calling again would return
+            # the identical no-op forever. Stop instead of looping.
+            break
+
+        if track_orbitals:
+            # Record every accepted cycle unconditionally (unlike
+            # return_mask_history below, which skips both the
+            # not-yet-basis_initialized bootstrap steps and the final,
+            # conv_tol-satisfying step) -- track_orbitals is meant to give
+            # a complete per-cycle record.
+            e_step, _, orbsym_step = diagonalize_masked(
+                mask_matrix(F, mask, is_restricted=is_restricted),
+                mask_matrix(S, mask),
+                fullbasis_mol if symmetry_aware else None, smask)
+            orbital_history.append({
+                'nfunc': int(np.sum(mask)),
+                'orbitals': get_occupied_orbitals(
+                    e_step, nocc, irrep_nelec if symmetry_aware else None,
+                    orbsym_step, restricted=is_restricted),
+            })
+
         if not basis_initialized:
             basis_initialized = np.sum(mask) >= np.max(nocc)
             continue
-        
+
         if  abs(n_added * difference) < conv_tol  or \
             sum(mask) == len(mask):
             break
@@ -1135,9 +1356,12 @@ def find_subspace(
 
     if get_smask:
         mask = smask
-        
+
     if return_mask_history:
         mask = mask_history
+
+    if track_orbitals:
+        return mask, orbital_history
 
     return mask
 
@@ -1221,7 +1445,9 @@ def expand_mask(
     Returns:
         The new mask (boolean ndarray), the current difference in
         eigenvalue sums and the current sum (energy sum of occupied
-        orbitals), shell mask if smask is provided.
+        orbitals), the number of functions added (0 if no candidate was a
+        genuine improvement -- see EXPAND_MASK_EPS -- in which case mask/
+        smask are returned unchanged), shell mask if smask is provided.
     """
     restricted = (len(F.shape) == 2)
     symmetry_aware = mol is not None and irrep_nelec is not None
@@ -1234,13 +1460,8 @@ def expand_mask(
     def _eig(maskedF, maskedS, test_smask):
         """Plain adb.eig, or symmetrized_eig + name-tagged orbsym when
         symmetry_aware."""
-        if not symmetry_aware:
-            return eig(maskedF, maskedS), None
-        sub_mol = create_subbasis_mol(mol, test_smask)
-        evals, coeffs, orbsym_id = symmetrized_eig(
-            maskedF, maskedS, sub_mol.symm_orb, sub_mol.irrep_id)
-        id_to_name = dict(zip(sub_mol.irrep_id, sub_mol.irrep_name))
-        orbsym = np.asarray([id_to_name[i] for i in orbsym_id])
+        evals, coeffs, orbsym = diagonalize_masked(
+            maskedF, maskedS, mol if symmetry_aware else None, test_smask)
         return (evals, coeffs), orbsym
 
     maskedF = mask_matrix(F, mask, restricted)
@@ -1312,8 +1533,22 @@ def expand_mask(
         test_differences = [(test_sum[1] - last_sum) for test_sum in test_sums]
     if variant == 'elden':
         array_index = np.argmax(test_differences)
+        no_improvement = test_differences[array_index] <= EXPAND_MASK_EPS
     else:
         array_index = np.argmin(test_differences)
+        no_improvement = test_differences[array_index] >= -EXPAND_MASK_EPS
+
+    if no_improvement:
+        # Every remaining candidate is tied with (or worse than) the
+        # current mask -- none of them is a genuine improvement. This
+        # happens once a target (e.g. a symmetry-aware irrep_nelec) is
+        # already fully satisfied and no untried candidate can affect it:
+        # np.argmin/argmax would otherwise just tie-break by array order
+        # and commit an arbitrary, meaningless addition. Leave the mask
+        # unchanged and signal "nothing to add" via n_added=0 instead --
+        # find_subspace stops on seeing this rather than looping forever.
+        return mask, 0.0, last_sum, 0, smask
+
     current_idx_to_flip = test_sums[array_index][0]
 
     if smask is None:
@@ -1345,6 +1580,7 @@ def mask_analysis(
     calculate_correction:   bool                = False,
     irrep_nelec:            dict | None         = None,
     debug:                  bool                = False,
+    track_orbitals:         bool                = False,
     ) -> list:
     """Run mask analysis.
 
@@ -1388,12 +1624,30 @@ def mask_analysis(
         calculate_correction : bool
             Whether to calculate the dual basis correction of Liang, Steele,
             Head-Gordon et al. for every subbasis.
+        track_orbitals : bool
+            Optional feature, off by default. When True, records the
+            *self-consistent* occupied orbital energies and their symmetry
+            labels (via get_occupied_orbitals_from_scf) for every subbasis
+            in mask_history that gets its own SCF run (i.e. every smask
+            entry; the plain-mask/non-SCF branch has no self-consistent
+            solution to record). This is the converged counterpart to
+            find_subspace(track_orbitals=True), which records the
+            unconverged guess-Fock-matrix spectrum seen *during* the ADB
+            search rather than the actual SCF solution of each subbasis.
+            When True, the return value becomes a 2-tuple
+            `(dataframe, orbital_history)` instead of just `dataframe` --
+            existing call sites assigning the return value to a single
+            variable are unaffected as long as this stays at its default.
+            Default False: behaviour/return shape identical to before this
+            option existed.
     Return:
         dataframe : array
             A python array with number of functions,
             current_sum, difference, total SCF energy, SCF energy of
             occupied orbitals and the projection onto the converged
-            full basis wave function will on every iteration.
+            full basis wave function will on every iteration. If
+            `track_orbitals=True`, a `(dataframe, orbital_history)` tuple
+            is returned instead -- see the `track_orbitals` Args entry.
     """
     scf_obj_copy = scf_obj.copy()
     if mol.symmetry and mol.groupname != 'C1':
@@ -1405,6 +1659,7 @@ def mask_analysis(
     #init_method = mask_history[0][3]
     initialized = False
     dataframe = []
+    orbital_history = [] if track_orbitals else None
     last_mask = [False] * fullbasis_mol.nao_nr()
     is_smask = isinstance(mask_history[0][0], np.ndarray)
     if is_smask:
@@ -1456,6 +1711,7 @@ def mask_analysis(
 
     for mask_i, current_val, difference, *init in mask_history:
         dE = 0.0
+        E_HF_largebasis = 0.0
         if is_smask:
             smask = mask_i
             extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(fullbasis_mol))
@@ -1539,7 +1795,13 @@ def mask_analysis(
             
             subbasis_converged = submf.converged
             scf_energy = submf.e_tot
- 
+
+            if track_orbitals:
+                orbital_history.append({
+                    'nfunc': int(np.sum(mask)),
+                    'orbitals': get_occupied_orbitals_from_scf(submf),
+                })
+
             if is_restricted:
                 # nocc_sb = np.sum(submf.mo_occ > 0)
                 nocc_sb = len(submf.mo_occ > 0)
@@ -1623,6 +1885,10 @@ def mask_analysis(
         last_mask = copy.deepcopy(mask)
         if is_smask:
             last_smask = copy.deepcopy(smask)
+
+    if track_orbitals:
+        return dataframe, orbital_history
+
     return dataframe
 
 
