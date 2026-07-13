@@ -197,3 +197,29 @@ def set_linked_shells(
     temp = val
     copysmask[same_as_selected,0] = temp
     return copysmask
+
+
+def mask_matrix(
+        mat:                numpy.ndarray,
+        mask:               numpy.ndarray,
+        is_restricted:      bool        = True ) -> numpy.ndarray:
+    """Return masked matrix
+
+    Args:
+        mat : ndarray
+            Matrix, e.g. Fock matrix. If using restricted Hartree-Fock,
+            should be 2D. If using unrestricted, 3D with alpha and beta
+            matrices as the array elements along axis 0 if such matrix.
+            (overlap matrix will only have one matrix in UHF)
+        mask : array
+            The basis mask.
+        is_restricted : bool
+            Whether using restricted or unrestricted HF. Optional,
+            default is True.
+
+    Returns:
+        masked_mat : ndarray
+            The masked matrix
+    """
+    is_restricted = (len(mat.shape) == 2)
+    return mat[mask, :][:, mask] if is_restricted else mat[:, mask, :][:, :, mask]

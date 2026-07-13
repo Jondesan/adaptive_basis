@@ -6,7 +6,7 @@ import os
 import argparse
 import re
 import adbutils
-from mask import link_shells
+from maskutil import link_shells
 
 num_of_occupying_electrons = 1
 

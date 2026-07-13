@@ -5,10 +5,13 @@ import pytest
 
 import adb
 import CONSTANTS
+import calculations
+import molutil
+import maskutil
 import pyscf
 
 # ---------------------------------------------------------------------------
-# adb.symmetrized_eig
+# calculations.symmetrized_eig
 # ---------------------------------------------------------------------------
 
 class TestSymmetrizedEig:
@@ -24,7 +27,7 @@ class TestSymmetrizedEig:
         F = mf.get_fock()
         S = mf.get_ovlp()
 
-        e, c, orbsym = adb.symmetrized_eig(
+        e, c, orbsym = calculations.symmetrized_eig(
             F, S, h2o_sto3g_c2v.symm_orb, h2o_sto3g_c2v.irrep_id)
 
         np.testing.assert_allclose(
@@ -34,7 +37,7 @@ class TestSymmetrizedEig:
 
 
 # ---------------------------------------------------------------------------
-# adb.get_iteration_criteria_value (irrep-aware 'enocc' branch)
+# calculations.get_iteration_criteria_value (irrep-aware 'enocc' branch)
 # ---------------------------------------------------------------------------
 
 class TestEnoccByIrrep:
@@ -48,7 +51,7 @@ class TestEnoccByIrrep:
         orbsym = np.array(['A1', 'A1', 'B1', 'A1', 'B1'])
         irrep_nelec = {'A1': 4, 'B1': 2}  # 2 A1 orbitals + 1 B1 orbital
 
-        val = adb.get_iteration_criteria_value(
+        val = calculations.get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(3, 3),
             irrep_nelec=irrep_nelec, orbsym=orbsym)
 
@@ -64,7 +67,7 @@ class TestEnoccByIrrep:
         orbsym = np.array(['A1', 'A1', 'B2'])
         irrep_nelec = {'A1': 4, 'B1': 2}  # B1 has zero available orbitals
 
-        val = adb.get_iteration_criteria_value(
+        val = calculations.get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(3, 3),
             irrep_nelec=irrep_nelec, orbsym=orbsym)
 
@@ -79,7 +82,7 @@ class TestEnoccByIrrep:
         orbsym = np.array(['A1', 'A1', 'B1'])
         irrep_nelec = {'A1': (2, 1)}  # 2 alpha, 1 beta in A1; nothing in B1
 
-        val = adb.get_iteration_criteria_value(
+        val = calculations.get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(2, 1),
             irrep_nelec=irrep_nelec, orbsym=orbsym)
 
@@ -88,7 +91,7 @@ class TestEnoccByIrrep:
 
     def test_orbsym_required_with_irrep_nelec(self):
         with pytest.raises(ValueError):
-            adb.get_iteration_criteria_value(
+            calculations.get_iteration_criteria_value(
                 'enocc', epsilon_i=np.array([-1.0]), nocc=(1, 1),
                 irrep_nelec={'A1': 2})
 
@@ -97,13 +100,13 @@ class TestEnoccByIrrep:
         the pre-existing, symmetry-blind lowest-N-by-energy criterion (2x
         for restricted -- each spatial orbital holds 2 electrons)."""
         epsilon_i = np.array([-2.0, -1.0, -0.5, 0.1, 0.2])
-        val = adb.get_iteration_criteria_value(
+        val = calculations.get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(2, 2))
         assert val == pytest.approx(2 * (-2.0 + -1.0))
 
 
 # ---------------------------------------------------------------------------
-# adb.expand_mask (symmetry-aware mode)
+# maskutil.expand_mask (symmetry-aware mode)
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
@@ -111,7 +114,7 @@ def h2o_c2v_scf_data(h2o_sto3g_c2v):
     mf = h2o_sto3g_c2v.RHF()
     mf.verbose = 0
     mf.kernel()
-    shellsep_mol = adb.create_shell_separated_mol(h2o_sto3g_c2v)
+    shellsep_mol = molutil.create_shell_separated_mol(h2o_sto3g_c2v)
     return {
         "mol": shellsep_mol,
         "F": mf.get_fock(),
@@ -130,10 +133,10 @@ def start_smask(h2o_c2v_scf_data):
     the very next expand_mask call has a real choice to make between them.
     """
     mol = h2o_c2v_scf_data["mol"]
-    smask = adb.init_smask(mol, mol.cart)
+    smask = maskutil.init_smask(mol, mol.cart)
     smask[0][0] = True  # O-1s
     smask[3][0] = True  # H-1s (atom 1)
-    smask = adb.set_linked_shells(smask, True)  # also flips the other H-1s
+    smask = maskutil.set_linked_shells(smask, True)  # also flips the other H-1s
     return smask
 
 
@@ -154,7 +157,7 @@ class TestExpandMaskSymmetryAware:
             self, h2o_c2v_scf_data, start_smask):
         d = h2o_c2v_scf_data
         smask = copy.deepcopy(start_smask)
-        mask = adb.smask_to_mask(smask, d["mol"].cart)
+        mask = maskutil.smask_to_mask(smask, d["mol"].cart)
 
         mask, _, _, n_added, smask = adb.expand_mask(
             d["F"], d["S"], d["nocc"], mask, smask=smask,
@@ -176,7 +179,7 @@ class TestExpandMaskSymmetryAware:
         """
         d = h2o_c2v_scf_data
         smask = copy.deepcopy(start_smask)
-        mask = adb.smask_to_mask(smask, d["mol"].cart)
+        mask = maskutil.smask_to_mask(smask, d["mol"].cart)
 
         mask, _, _, n_added, smask = adb.expand_mask(
             d["F"], d["S"], d["nocc"], mask, smask=smask,
@@ -257,7 +260,7 @@ class TestFindSubspaceSymmetryAware:
 
 
 # ---------------------------------------------------------------------------
-# adb.diagonalize_masked
+# calculations.diagonalize_masked
 # ---------------------------------------------------------------------------
 
 class TestDiagonalizeMasked:
@@ -269,8 +272,8 @@ class TestDiagonalizeMasked:
         function)."""
         h = np.array([[2.0, 0.3], [0.3, 1.0]])
         s = np.eye(2)
-        e1, c1 = adb.eig(h, s)
-        e2, c2, orbsym = adb.diagonalize_masked(h, s, mol=None)
+        e1, c1 = calculations.eig(h, s)
+        e2, c2, orbsym = calculations.diagonalize_masked(h, s, mol=None)
         np.testing.assert_allclose(np.real(e1), np.real(e2))
         np.testing.assert_allclose(np.real(c1), np.real(c2))
         assert orbsym is None
@@ -283,14 +286,14 @@ class TestDiagonalizeMasked:
         mf.kernel()
         F, S = mf.get_fock(), mf.get_ovlp()
 
-        shellsep_mol = adb.create_shell_separated_mol(h2o_sto3g_c2v)
-        full_smask = adb.init_smask(shellsep_mol, shellsep_mol.cart)
+        shellsep_mol = molutil.create_shell_separated_mol(h2o_sto3g_c2v)
+        full_smask = maskutil.init_smask(shellsep_mol, shellsep_mol.cart)
         for row in full_smask:
             row[0] = True
 
-        e1, c1, orbsym1 = adb.symmetrized_eig(
+        e1, _, orbsym1 = calculations.symmetrized_eig(
             F, S, h2o_sto3g_c2v.symm_orb, h2o_sto3g_c2v.irrep_id)
-        e2, c2, orbsym2 = adb.diagonalize_masked(
+        e2, _, orbsym2 = calculations.diagonalize_masked(
             F, S, mol=shellsep_mol, smask=full_smask)
 
         np.testing.assert_allclose(np.sort(np.real(e1)), np.sort(np.real(e2)))
