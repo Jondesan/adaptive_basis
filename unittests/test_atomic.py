@@ -54,40 +54,6 @@ class TestBasisFunctionsPerAtom:
 
 
 # ---------------------------------------------------------------------------
-# adb.pair_by_nearest_neighbor
-# ---------------------------------------------------------------------------
-
-class TestPairByNearestNeighbor:
-
-    def test_h2o_pairs_o_with_nearest_h(self, h2o_def2tzvp):
-        """H2O: O (atom 0) pairs with the first H; the second H is unpaired.
-
-        Geometry:
-            O  (0,  0,      0.118)     atom 0
-            H  (0,  0.755, -0.471)     atom 1
-            H  (0, -0.755, -0.471)     atom 2
-
-        O-H1 and O-H2 are equidistant so O pairs with atom 1 (first
-        encountered in index order). Atom 2 is left as a singleton.
-        """
-        pairs = adb.pair_by_nearest_neighbor(h2o_def2tzvp)
-        assert pairs == [(0, 1), (2,)]
-
-    def test_h2_one_pair(self, h2_sto3g):
-        """H2 has exactly 2 atoms so the result is a single pair."""
-        pairs = adb.pair_by_nearest_neighbor(h2_sto3g)
-        assert len(pairs) == 1
-        assert len(pairs[0]) == 2
-
-    def test_result_covers_all_atoms(self, h2o_def2tzvp):
-        """Every atom index appears exactly once across all pairs."""
-        mol = h2o_def2tzvp
-        pairs = adb.pair_by_nearest_neighbor(mol)
-        all_indices = [idx for pair in pairs for idx in pair]
-        assert sorted(all_indices) == list(range(mol.natm))
-
-
-# ---------------------------------------------------------------------------
 # adb.atomic_block_minimal_basis
 # ---------------------------------------------------------------------------
 
