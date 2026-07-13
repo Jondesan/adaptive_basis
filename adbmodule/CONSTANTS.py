@@ -43,3 +43,11 @@ ELEMENTS = [
 # orbital-energy sum, so the greedy search always prioritises adding shells
 # of an under-represented irrep before anything else.
 SYMMETRY_SHORTFALL_PENALTY = 1e3
+
+# Tolerance used by expand_mask to detect a *genuinely* tied/non-improving
+# best candidate (as opposed to conv_tol, which governs how small a real
+# improvement has to be before find_subspace decides to stop). Deliberately
+# far tighter than any realistic conv_tol -- this only catches exact (up to
+# floating-point noise) ties, e.g. every remaining candidate being provably
+# irrelevant to an already-satisfied symmetry-aware target.
+EXPAND_MASK_EPS = 1e-12
