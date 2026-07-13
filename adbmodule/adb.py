@@ -1,277 +1,24 @@
 """Adaptive basis set method"""
 
-
-
-# import pyscf
 import numpy as np
-from scipy import linalg
-# from itertools import count
-from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem,\
-    to_general_contraction, convert_ecp_to_nwchem
-from pyscf.gto.ecp import core_configuration
-from pyscf.data.elements import _std_symbol, ELEMENTS
-from pyscf.gto.basis.parse_nwchem import load
 from pyscf.gto.mole import *
 from pyscf.scf import *
-from pyscf.scf.addons import canonical_orth_, project_dm_nr2nr
-from pyscf import lib, gto, scf, symm
-import pyscf
+from pyscf.scf.addons import project_dm_nr2nr
+from pyscf import gto, scf, symm
 from warnings import warn
 from operator import itemgetter
-import adbutils
 import atomic_block_util
 import copy
 import sys
-import re
-from calculations import eig, symmetrized_eig, get_iteration_criteria_value, get_q_sqrd
-from mask import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label
-from CONSTANTS import NFUNCS, EXPAND_MASK_EPS
-
-
-def dual_basis_energy_correction(
-    scf_obj: scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
-    P_full_projected: np.ndarray
-    ) -> tuple[float, float]:
-
-    F_full = scf_obj.get_fock(dm = P_full_projected)
-    E_new, C_new = scf_obj.eig(F_full, scf_obj.get_ovlp())
-    P_new = scf_obj.make_rdm1(
-        mo_coeff = C_new,
-        mo_occ = scf_obj.get_occ(mo_energy = E_new, mo_coeff = C_new))
-    dP = P_new - P_full_projected
-    # If unrestricted calculation
-    if len(dP.shape) > 2:
-        dE = (np.trace(dP[0] @ F_full[0]) + np.trace(dP[1] @ F_full[1])) / 2
-    else:
-        dE = np.trace(dP @ F_full)
-    return np.real(dE), scf_obj.e_tot
-
-
-def extract_basis(
-        smask:          np.ndarray,
-        shellsep_mol:   gto.MoleBase
-    ) -> tuple[dict, dict | None]:
-    """Extract a basis from given shell mask as python dictionary in
-    pySCF format.
-
-    Args:
-        smask : ndarray
-            Shell mask. Basis will be extracted according to this.
-
-        shellsep_mol : pyscf.MoleBase object
-            molecule object from whose basis the new basis will be
-            extracted.
-
-    Returns:
-        basis : dict
-            the masked basis of the molecule as a dictionary according
-            pySCF format.
-        ecp_basis : none | dict
-            the ECP basis dictionary if present in the full basis of
-            shellsep_mol. Otherwise returns None.
-    """
-
-    if len(smask) != len(shellsep_mol._bas):
-        raise ValueError(
-            "Shell mask does not match with _bas attribute!"
-            + " Make sure the shellsep_mol objects shells have been separated"
-            + " using the create_shell_separated_mol method."
-        )
-
-    asymb = list(shellsep_mol._basis.keys())
-    basis = dict.fromkeys(asymb)
-
-    duplicate_removed_smask = []
-    found_atoms = []
-    current_id = -1
-    # Collect unique atom smasks (if same atom is present in the shellsep_mol
-    # more than once, ignore its mask after the first one)
-    for elem in copy.deepcopy(smask[np.asarray(smask[:, 0], dtype = bool)]):
-        if elem[3][1] not in found_atoms:
-            found_atoms.append(elem[3][1])
-            current_id = elem[3][0]
-        elif current_id != elem[3][0]:
-            continue
-        duplicate_removed_smask.append(elem)
-
-    duplicate_removed_smask = np.array(duplicate_removed_smask)
-    # Initialize distinct atoms' dictionary formatted basis structures
-    # with angular momentum angl
-    for angl, shl in duplicate_removed_smask[:, [2, 3]]:
-        if basis[shl[1]] is None:
-            basis[shl[1]] = []
-        if angl not in [x[0] for x in basis[shl[1]]]:
-            basis[shl[1]].append([angl])
-
-    # Append exponents and contraction coefficients
-    for key in asymb:#basis.keys():
-        ogbas = to_general_contraction(shellsep_mol._basis[key])
-        # Important when initialization does not put functions on all
-        # atoms in the molecule, would result in error
-        if basis[key] is None:
-            continue
-        for shell in basis[key]:
-            i = shell[0]
-            key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
-            idxs = [idx[3][4] - idx[2] for idx in key_smask if idx[2] == i]
-            coeff_table = np.asarray(ogbas[i][1:], dtype=float)[:, [0] + idxs]
-            # Remove rows and columns with all 0 contraction coeffs
-            filtered_shell = coeff_table[
-                ~((coeff_table[:, 0] != 0) &
-                (coeff_table[:, 1:] == 0).all(axis = 1))]
-            filtered_shell = filtered_shell[~np.all(filtered_shell == 0, axis = 1)]
-            if not filtered_shell.tolist():
-                basis[key].pop(i)
-            else:
-                shell.extend(filtered_shell.tolist())
-    ecp = shellsep_mol._ecp if shellsep_mol._ecp != {} else None
-    return basis, ecp
-
-
-def basis_to_file_nwchem(
-    basis:              dict,
-    fn:                 str,
-    ecp_basis:          dict | None = None,
-    commentstring:      str         = "",
-    bsname:             str         = "ao basis",
-    cart:               bool        = False,
-    print_noprint:      str         = "print",
-    additional_labels:  str         = "" ) -> None:
-    """Converts the basis to NWChem format and writes it into a file.
-
-    Args:
-        basis : dict
-            PySCF formatted basis structure
-        fn : str
-            File name for basis file
-        bsname : str
-            Basis name for basis file data
-        cart : bool
-            Whether basis in cartesian or spherical geometry
-        print_noprint : str
-            NWChem print option
-        additional_labels : str
-            Additional NWChem options
-    """
-    sph_cart = "cartesian" if cart else "spherical"
-    with open(fn + '.nw', "w") as f:
-        if len(commentstring) != 0:
-            for commentline in commentstring.split('#'):
-                f.write(f"#{commentline}\n")
-            f.write("\n")
-        f.write(f'BASIS "{bsname}" {sph_cart} {print_noprint} ')
-        f.write(f"{additional_labels}\n")
-
-        for asymb, atom_basis in basis.items():
-            bs_atom_nwchem = convert_basis_to_nwchem(asymb, atom_basis)
-            f.write(f"{bs_atom_nwchem}\n")
-        f.write("END")
-
-        if ecp_basis is not None:
-            f.write('\n\n\nECP\n')
-            for asymb, atom_ecp in ecp_basis.items():
-                ecp_atom_nwchem = convert_ecp_to_nwchem(asymb, atom_ecp)
-                f.write(ecp_atom_nwchem)
-                f.write('\n')
-            f.write("END")
-
-    return
-
-
-def get_uncontracted_basis(
-        mol:    gto.MoleBase,
-        fn:     str | None    = None) -> str:
-    """Unravel the contracted basis of mol.
-
-    Args:
-        mol : pyscf.MoleBase object
-            molecule object.
-        fn : None or str
-            the file name to which write the basis. If None, basis will
-            not be written into a file, only returned as a str.
-
-    Returns:
-        The basis as a pySCF formatted string, which can be used with
-        pyscf.gto.basis.parse.
-    """
-    line  = 'BASIS "ao basis" PRINT\n'
-    basis = ""
-
-    if fn is not None:
-        f = open("tempbasis/" + fn + ".dat", "w")
-        f.write(line)
-
-    asymb = list(set([mol.atom_pure_symbol(i) for i in range(len(mol._atom))]))
-    for asy in asymb:
-        line = "#BASIS SET:\n"
-        basis += line
-        if fn is not None:
-            f.write(line)
-
-        for shell in mol._basis[asy]:
-            coeffs = np.array(shell[1:])
-            contractions = coeffs.shape[1]
-            for i in range(1, contractions):
-                line = (
-                    asy + "\t" + lib.param.ANGULAR[shell[0]].capitalize() + "\n"
-                )
-                basis += line
-                if fn is not None:
-                    f.write(line)
-                for b in coeffs:
-                    line = f"{b[0]:15.7f}\t{b[i]:15.7f}\n"
-                    basis += line
-                    if fn is not None:
-                        f.write(line)
-    line = "END\n"
-    if fn is not None:
-        f.write(line)
-        f.close()
-    return basis
-
-
-def get_basis_dict(basis: str) -> dict:
-    """Convert a basis string into a dictionary to pass
-    to pyscf.gto.basis.parse
-    """
-
-    dc = dict()
-    for elem in basis.split("#")[1:]:
-        dc[elem[11]] = gto.basis.parse(str(elem[11:]))
-    return dc
-
-
-def get_shells(mol: gto.MoleBase) -> np.ndarray:
-    """Get the shell structure of mol object.
-
-    Args:
-        mol : pyscf.gto.MoleBase
-            The molecule object.
-
-    Returns:
-        A 1D ndarray with the number of functions per shell as elements.
-        Shells are ordered in the pyscf internal format.
-    """
-    shells = np.array([], dtype=int)  # Number of functions per shell
-
-    for ib in range(mol.nbas):  # nbas = number of shells (basis fcts)
-        angl = mol.bas_angular(ib)  # angular momentum l of given basis function
-        nc = mol.bas_nctr(ib)  # number of CGTOs for given shell
-
-        shells = np.append(
-            shells, nc * (angl + 1) * (angl + 2) // 2 if mol.cart else nc * (2 * angl + 1)
-        )
-
-    if sum(shells) != mol.nao_nr():
-        raise Exception(
-            "Number of functions in the mask does not correspond with number of functions in the molecule!"
-        )
-
-    return shells
+from calculations import eig, symmetrized_eig, get_iteration_criteria_value, get_q_sqrd, dual_basis_energy_correction, diagonalize_masked
+from maskutil import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label, mask_matrix
+from molutil import create_shell_separated_mol, basis_functions_per_atom
+from basisutil import extract_basis
+from CONSTANTS import NFUNCS, EXPAND_MASK_EPS, ELEMENTS
 
 
 def get_sub_scf_attributes(
-    mol:            gto.MoleBase,
+    mol:            gto.Mole,
     fock:           np.ndarray,
     overlap:        np.ndarray,
     dft:            bool            = False,
@@ -281,7 +28,7 @@ def get_sub_scf_attributes(
     """Calculates converged attributes for the system.
 
     Args:
-        mol : pyscf.gto.MoleBase
+        mol : pyscf.gto.Mole
             The molecule object
         dft : bool
             Hartree-Fock or DFT.
@@ -325,56 +72,6 @@ def get_sub_scf_attributes(
             np.sort(mf.mo_energy[1])[:nocc_sb[1]])
         
     return scf_energy, scf_orbital_energy, mf.mo_coeff
-
-
-def create_subbasis_mol(
-        mol:        gto.MoleBase,
-        smask:      np.ndarray    ) -> gto.MoleBase:
-
-    extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(mol))
-    subbasis_mol = gto.Mole(
-        atom = mol.atom, basis = extracted_basis,
-        charge = mol.charge, spin = mol.spin,
-        verbose = mol.verbose, unit = mol.unit,
-        ecp = ecp_bas, symmetry = mol.symmetry
-    )
-    subbasis_mol.build()
-
-    return subbasis_mol
-
-
-def diagonalize_masked(
-        maskedF:    np.ndarray,
-        maskedS:    np.ndarray,
-        mol:        gto.MoleBase | None = None,
-        smask:      np.ndarray | None   = None,
-        ) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-    """Diagonalize an already-masked (Fock, overlap) pair.
-
-    Plain adb.eig (symmetry-blind) when `mol` is None. When `mol` is given
-    (the shell-separated mol whose shells `smask` indexes into -- see
-    expand_mask's docstring), builds a fresh subbasis Mole via
-    create_subbasis_mol(mol, smask) and diagonalizes block-by-irrep with
-    symmetrized_eig instead, returning a name-tagged `orbsym` array.
-
-    Shared by expand_mask's symmetry-aware branch, find_subspace's
-    symmetry-aware pre-loop baseline, and find_subspace's optional
-    track_orbitals bookkeeping -- pulled out to a top-level function so
-    those three call sites diagonalize a masked subbasis identically
-    instead of maintaining three copies of the same branch.
-
-    Returns:
-        evals, coeffs, orbsym (None when mol is None).
-    """
-    if mol is None:
-        evals, coeffs = eig(maskedF, maskedS)
-        return evals, coeffs, None
-    sub_mol = create_subbasis_mol(mol, smask)
-    evals, coeffs, orbsym_id = symmetrized_eig(
-        maskedF, maskedS, sub_mol.symm_orb, sub_mol.irrep_id)
-    id_to_name = dict(zip(sub_mol.irrep_id, sub_mol.irrep_name))
-    orbsym = np.asarray([id_to_name[i] for i in orbsym_id])
-    return evals, coeffs, orbsym
 
 
 def get_occupied_orbitals(
@@ -508,20 +205,6 @@ def write_orbital_history(
                 f.write(f"{nfunc},{energy:.12f},{irrep if irrep is not None else ''}\n")
 
 
-def create_shell_separated_mol(
-        mol:        gto.MoleBase,
-        verbose:    int           = 0) -> gto.MoleBase:
-    """Creates a copy of mol with shells separated."""
-    shell_sep_basis = get_uncontracted_basis(mol)
-    cmol = gto.M(
-        atom=mol.atom, basis=shell_sep_basis,
-        charge=mol.charge, spin=mol.spin,
-        unit=mol.unit, symmetry=mol.symmetry,
-        ecp=mol.ecp,
-        verbose=0)
-    return cmol
-
-
 def print_data_header() -> None:
     print(
             f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}' +\
@@ -555,46 +238,6 @@ def print_data(
     print(f'  {diff:{">15s" if isinstance(diff, str) else "15.9f"}}', end="")
     print(f'  {E_scf:{">15s" if isinstance(E_scf, str) else "15.9f"}}', end="")
     print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "18.12f"}}')
-
-
-def mask_matrix(
-        mat:                np.ndarray,
-        mask:               np.ndarray,
-        is_restricted:      bool        = True ) -> np.ndarray:
-    """Return masked matrix
-
-    Args:
-        mat : ndarray
-            Matrix, e.g. Fock matrix. If using restricted Hartree-Fock,
-            should be 2D. If using unrestricted, 3D with alpha and beta
-            matrices as the array elements along axis 0 if such matrix.
-            (overlap matrix will only have one matrix in UHF)
-        mask : array
-            The basis mask.
-        is_restricted : bool
-            Whether using restricted or unrestricted HF. Optional,
-            default is True.
-
-    Returns:
-        masked_mat : ndarray
-            The masked matrix
-    """
-    is_restricted = (len(mat.shape) == 2)
-    return mat[mask, :][:, mask] if is_restricted else mat[:, mask, :][:, :, mask]
-
-
-def basis_functions_per_atom(mol: gto.MoleBase) -> np.ndarray:
-    basis_struct = mol._bas
-    atoms = mol._atom
-    nat = len(atoms)
-    func_per_atom = np.zeros(nat, dtype=int)
-    for i in range(nat):
-        angl = basis_struct[basis_struct[:,0]==i][:,1]
-        numc = basis_struct[basis_struct[:,0]==i][:,3] # Number of CGTOs
-        func_per_atom[i] = np.sum((2*angl+1) * numc) if not mol.cart \
-                           else np.sum((angl + 1)*(angl + 2) // 2 * numc)
-    
-    return func_per_atom
 
 
 def spherical_average(mat: np.ndarray, ml: np.ndarray) -> np.ndarray:
@@ -638,7 +281,7 @@ def sph_avg(mat: np.ndarray, ml: np.ndarray) -> np.ndarray:
 
 
 def atomic_block_minimal_basis(
-    mol:                        gto.MoleBase,
+    mol:                        gto.Mole,
     F:                          np.ndarray,
     S:                          np.ndarray,
     Q_tol:                      float           = 1.0,
@@ -805,7 +448,7 @@ def atomic_block_minimal_basis(
 
 
 def pair_by_nearest_neighbor(
-        mol: gto.MoleBase,
+        mol: gto.Mole,
         inclusive_uneven: bool = False
     ) -> list:
     paired_coord_indices = []
@@ -847,7 +490,7 @@ def pair_by_nearest_neighbor(
 
 
 def pseudominimal_basis_nearest_neighbor(
-    mol:                        gto.MoleBase,
+    mol:                        gto.Mole,
     F:                          np.ndarray,
     S:                          np.ndarray,
     Q_tol:                      float           = 1.0,
@@ -1048,7 +691,7 @@ def pseudominimal_basis_nearest_neighbor(
 def find_subspace(
     F:                          np.ndarray,
     S:                          np.ndarray,
-    mol:                        gto.MoleBase,
+    mol:                        gto.Mole,
     scf_obj:                    scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
     conv_tol:                   float           = 1e-2,
     verbose:                    bool            = True,
@@ -1073,8 +716,8 @@ def find_subspace(
             The full Fock matrix that will be sampled.
         S : ndarray
             The overlap matrix.
-        mol : MoleBase
-            The MoleBase molecule object
+        mol : Mole
+            The Mole molecule object
         scf_obj : SCF
             The SCF object corresponding to mol
         conv_tol : float
@@ -1369,7 +1012,7 @@ def expand_mask(
     Cfull:                  np.ndarray | None   = None,
     link_shells:            bool                = True,
     nfunc_normalisation:    bool                = True,
-    mol:                    gto.MoleBase | None = None,
+    mol:                    gto.Mole | None = None,
     irrep_nelec:            dict | None         = None,
     ) -> tuple[np.ndarray, float, float, int, np.ndarray | None]:
     r"""Expands the current mask by either one function or one shell
@@ -1417,7 +1060,7 @@ def expand_mask(
         grid_level : int
             predefined integration grid levels, 0-9
             (0 very sparse, 9 very dense). Optional, default is 3.
-        mol : MoleBase | None
+        mol : Mole | None
             Optional. When given together with `irrep_nelec`, every trial
             (and the current) masked Fock/overlap matrix is diagonalized
             block-by-irrep (symmetrized_eig) instead of with the plain,
@@ -1557,7 +1200,7 @@ def expand_mask(
 
 def mask_analysis(
     mask_history:           np.ndarray,
-    mol:                    gto.MoleBase,
+    mol:                    gto.Mole,
     scf_obj:                scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
     fock:                   np.ndarray,
     ovlp:                   np.ndarray,
@@ -1581,7 +1224,7 @@ def mask_analysis(
             The mask/smask history for which to run the analysis on. Elements
             will be tuples, with i:th tuple being
             (i:th mask/smask, i:th criteria value, i:th difference)
-        mol : pyscf.gto.MoleBase object
+        mol : pyscf.gto.Mole object
             The molecule object
         scf_obj : pyscf.scf.(U/R/RO/D/-)HF object
             The self-consistent field object

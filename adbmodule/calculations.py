@@ -1,7 +1,9 @@
 import numpy
 from scipy import linalg
 from pyscf.scf.addons import canonical_orth_
+from pyscf.gto import Mole
 from pyscf.symm import symmetrize_matrix
+from molutil import create_subbasis_mol
 from CONSTANTS import VARIANTS, SYMMETRY_SHORTFALL_PENALTY
 
 def eig(
@@ -248,3 +250,56 @@ def get_q_sqrd(
             Cfull[1, :, :nocc[1]].T @ ovlp @ Csub[1, :, :nocc[1]]
         ]
         return numpy.real((numpy.sum(numpy.sum(Q[0]**2)) + numpy.sum(numpy.sum(Q[1]**2))))
+    
+
+def diagonalize_masked(
+        maskedF:    numpy.ndarray,
+        maskedS:    numpy.ndarray,
+        mol:        Mole | None = None,
+        smask:      numpy.ndarray | None   = None,
+        ) -> tuple[numpy.ndarray, numpy.ndarray, numpy.ndarray | None]:
+    """Diagonalize an already-masked (Fock, overlap) pair.
+
+    Plain adb.eig (symmetry-blind) when `mol` is None. When `mol` is given
+    (the shell-separated mol whose shells `smask` indexes into -- see
+    expand_mask's docstring), builds a fresh subbasis Mole via
+    create_subbasis_mol(mol, smask) and diagonalizes block-by-irrep with
+    symmetrized_eig instead, returning a name-tagged `orbsym` array.
+
+    Shared by expand_mask's symmetry-aware branch, find_subspace's
+    symmetry-aware pre-loop baseline, and find_subspace's optional
+    track_orbitals bookkeeping -- pulled out to a top-level function so
+    those three call sites diagonalize a masked subbasis identically
+    instead of maintaining three copies of the same branch.
+
+    Returns:
+        evals, coeffs, orbsym (None when mol is None).
+    """
+    if mol is None:
+        evals, coeffs = eig(maskedF, maskedS)
+        return evals, coeffs, None
+    sub_mol = create_subbasis_mol(mol, smask)
+    evals, coeffs, orbsym_id = symmetrized_eig(
+        maskedF, maskedS, sub_mol.symm_orb, sub_mol.irrep_id)
+    id_to_name = dict(zip(sub_mol.irrep_id, sub_mol.irrep_name))
+    orbsym = numpy.asarray([id_to_name[i] for i in orbsym_id])
+    return evals, coeffs, orbsym
+
+
+def dual_basis_energy_correction(
+    scf_obj,
+    P_full_projected: numpy.ndarray
+    ) -> tuple[float, float]:
+
+    F_full = scf_obj.get_fock(dm = P_full_projected)
+    E_new, C_new = scf_obj.eig(F_full, scf_obj.get_ovlp())
+    P_new = scf_obj.make_rdm1(
+        mo_coeff = C_new,
+        mo_occ = scf_obj.get_occ(mo_energy = E_new, mo_coeff = C_new))
+    dP = P_new - P_full_projected
+    # If unrestricted calculation
+    if len(dP.shape) > 2:
+        dE = (numpy.trace(dP[0] @ F_full[0]) + numpy.trace(dP[1] @ F_full[1])) / 2
+    else:
+        dE = numpy.trace(dP @ F_full)
+    return numpy.real(dE), scf_obj.e_tot
