@@ -6,6 +6,7 @@ import os
 import argparse
 import re
 import adbutils
+from mask import link_shells
 
 num_of_occupying_electrons = 1
 
@@ -482,7 +483,7 @@ def find_projected_minimal_basis_mask(
         idx = np.argmax(np.abs(ovlp_col[shell_offset:shell_offset + nfunc_angl]))
         mask[shell_offset + idx] = 1
 
-    mask = adb.link_shells(mol, mask)
+    mask = link_shells(mol, mask)
     if np.sum(mask) != mol_sto3g.nao_nr():
         raise RuntimeError(f"Number of functions in the projected minimal basis [{np.sum(mask)}] does not match the number of functions in the actual minimal basis [{mol_sto3g.nao_nr()}]!")
 
