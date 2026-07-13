@@ -25,15 +25,7 @@ import sys
 import re
 from calculations import eig, symmetrized_eig, get_iteration_criteria_value, get_q_sqrd
 from mask import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label
-from CONSTANTS import NFUNCS
-
-# Tolerance used by expand_mask to detect a *genuinely* tied/non-improving
-# best candidate (as opposed to conv_tol, which governs how small a real
-# improvement has to be before find_subspace decides to stop). Deliberately
-# far tighter than any realistic conv_tol -- this only catches exact (up to
-# floating-point noise) ties, e.g. every remaining candidate being provably
-# irrelevant to an already-satisfied symmetry-aware target.
-EXPAND_MASK_EPS = 1e-12
+from CONSTANTS import NFUNCS, EXPAND_MASK_EPS
 
 
 def dual_basis_energy_correction(
