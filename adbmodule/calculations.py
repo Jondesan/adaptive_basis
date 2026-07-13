@@ -286,6 +286,46 @@ def diagonalize_masked(
     return evals, coeffs, orbsym
 
 
+def spherical_average(mat: numpy.ndarray, ml: numpy.ndarray) -> numpy.ndarray:
+    """Calculate the spherical average of a matrix.
+
+    Args:
+        mat : ndarray
+            The (Fock) matrix which will be spherically averaged.
+        ml : ndarray | arraylike
+            An array with the numbers of functions on the shells.
+    """
+
+    mat_copy = mat.copy()
+    restricted = (len(mat_copy.shape) == 2)
+    if restricted:
+        return sph_avg(mat_copy, ml)
+    mat_out = numpy.ndarray(mat_copy.shape)
+    mat_out[0] = sph_avg(mat_copy[0], ml)
+    mat_out[1] = sph_avg(mat_copy[1], ml)
+    return mat_out
+
+
+def sph_avg(mat: numpy.ndarray, ml: numpy.ndarray) -> numpy.ndarray:
+    mat_copy = mat.copy()
+    offset = 0
+    for nfunc in ml:
+        if nfunc == 1:
+            offset += nfunc
+            continue
+        shell_mat = mat_copy[offset:offset+nfunc, offset:offset+nfunc]
+        # Extract diagonal of the shell block
+        diag = numpy.diag(shell_mat)
+        avg = numpy.mean(diag)
+        shell_mat = numpy.diag([avg]*diag.shape[0])
+
+        for i in range(nfunc):
+            mat_copy[offset+i,offset:offset+nfunc] = shell_mat[i,:]
+
+        offset += nfunc
+    return mat_copy
+
+
 def dual_basis_energy_correction(
     scf_obj,
     P_full_projected: numpy.ndarray
