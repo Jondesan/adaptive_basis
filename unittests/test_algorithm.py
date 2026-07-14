@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
-import copy
-import adb
+from copy import deepcopy
+from adb import find_subspace, expand_mask
 
 
 # ---------------------------------------------------------------------------
@@ -65,8 +65,8 @@ class TestExpandMask:
         """expand_mask must return exactly five values (mask, difference,
         criteria_val, nfuncs_in_trial, smask)."""
         d = scf_data
-        result = adb.expand_mask(
-            d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
+        result = expand_mask(
+            d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
         assert len(result) == 5
@@ -74,9 +74,9 @@ class TestExpandMask:
     def test_new_mask_is_superset_of_old(self, scf_data, initial_mask):
         """Every function that was True before must still be True after expansion."""
         d = scf_data
-        old_mask = copy.deepcopy(initial_mask)
-        new_mask, _, _, _, _ = adb.expand_mask(
-            d["F"], d["S"], d["nocc"], copy.deepcopy(old_mask),
+        old_mask = deepcopy(initial_mask)
+        new_mask, _, _, _, _ = expand_mask(
+            d["F"], d["S"], d["nocc"], deepcopy(old_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
         assert np.all(new_mask[old_mask])
@@ -85,8 +85,8 @@ class TestExpandMask:
         """Each call must add at least one function to the mask."""
         d = scf_data
         old_count = np.sum(initial_mask)
-        new_mask, _, _, _, _ = adb.expand_mask(
-            d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
+        new_mask, _, _, _, _ = expand_mask(
+            d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
         assert np.sum(new_mask) > old_count
@@ -94,8 +94,8 @@ class TestExpandMask:
     def test_smask_is_none_when_not_provided(self, scf_data, initial_mask):
         """When called without a smask argument, the returned smask must be None."""
         d = scf_data
-        _, _, _, _, smask_out = adb.expand_mask(
-            d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
+        _, _, _, _, smask_out = expand_mask(
+            d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"],
         )
         assert smask_out is None
@@ -103,8 +103,8 @@ class TestExpandMask:
     def test_difference_is_negative_for_enocc(self, scf_data, initial_mask):
         """For enocc, adding an orbital lowers the sum, so difference should be ≤ 0."""
         d = scf_data
-        _, diff, _, _, _ = adb.expand_mask(
-            d["F"], d["S"], d["nocc"], copy.deepcopy(initial_mask),
+        _, diff, _, _, _ = expand_mask(
+            d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
             hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
         )
         assert diff <= 0.0
@@ -112,11 +112,11 @@ class TestExpandMask:
     def test_sequential_calls_grow_mask(self, scf_data, initial_mask):
         """Repeated calls should keep adding functions until the full basis is reached."""
         d = scf_data
-        mask = copy.deepcopy(initial_mask)
+        mask = deepcopy(initial_mask)
         prev_count = np.sum(mask)
 
         for _ in range(d["mol"].nao - np.sum(initial_mask)):
-            mask, _, _, _, _ = adb.expand_mask(
+            mask, _, _, _, _ = expand_mask(
                 d["F"], d["S"], d["nocc"], mask,
                 hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
             )
@@ -141,7 +141,7 @@ class TestFindSubspace:
 
     def test_returns_boolean_mask(self, h2o_sto3g, h2o_sto3g_mf, scf_data):
         d = scf_data
-        mask = adb.find_subspace(
+        mask = find_subspace(
             d["F"], d["S"], h2o_sto3g, h2o_sto3g_mf,
             conv_tol=1e-2, verbose=False,
         )
@@ -150,7 +150,7 @@ class TestFindSubspace:
 
     def test_mask_length_equals_nao(self, h2o_sto3g, h2o_sto3g_mf, scf_data):
         d = scf_data
-        mask = adb.find_subspace(
+        mask = find_subspace(
             d["F"], d["S"], h2o_sto3g, h2o_sto3g_mf,
             conv_tol=1e-2, verbose=False,
         )
@@ -159,7 +159,7 @@ class TestFindSubspace:
     def test_at_least_nocc_functions_selected(self, h2o_sto3g, h2o_sto3g_mf, scf_data):
         """The subspace must span at least as many functions as occupied orbitals."""
         d = scf_data
-        mask = adb.find_subspace(
+        mask = find_subspace(
             d["F"], d["S"], h2o_sto3g, h2o_sto3g_mf,
             conv_tol=1e-2, verbose=False,
         )
@@ -168,7 +168,7 @@ class TestFindSubspace:
     def test_history_mode_returns_list(self, h2o_sto3g, h2o_sto3g_mf, scf_data):
         """With return_mask_history=True, a list of (mask, val, diff, ...) tuples is returned."""
         d = scf_data
-        history = adb.find_subspace(
+        history = find_subspace(
             d["F"], d["S"], h2o_sto3g, h2o_sto3g_mf,
             conv_tol=0.5, verbose=False, return_mask_history=True,
         )
@@ -183,11 +183,11 @@ class TestFindSubspace:
     ):
         """A tighter convergence tolerance should select at least as many functions."""
         d = scf_data
-        loose = adb.find_subspace(
+        loose = find_subspace(
             d["F"], d["S"], h2o_sto3g, h2o_sto3g_mf,
             conv_tol=0.5, verbose=False,
         )
-        tight = adb.find_subspace(
+        tight = find_subspace(
             d["F"], d["S"], h2o_sto3g, h2o_sto3g_mf,
             conv_tol=1e-3, verbose=False,
         )

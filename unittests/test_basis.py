@@ -1,7 +1,5 @@
 import pytest
-import numpy as np
 from pyscf import gto
-import adb
 from molutil import create_shell_separated_mol, create_subbasis_mol
 from maskutil import init_smask
 from basisutil import extract_basis
