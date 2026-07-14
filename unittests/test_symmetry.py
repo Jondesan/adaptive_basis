@@ -15,9 +15,10 @@ from maskutil import init_smask, set_linked_shells, smask_to_mask
 from ioutil import write_orbital_history
 import pyscf
 
-# ---------------------------------------------------------------------------
-# calculations.symmetrized_eig
-# ---------------------------------------------------------------------------
+
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ calculations.symmetrized_eig                                            │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestSymmetrizedEig:
 
@@ -41,9 +42,9 @@ class TestSymmetrizedEig:
         assert c.shape == (h2o_sto3g_c2v.nao_nr(), e.size)
 
 
-# ---------------------------------------------------------------------------
-# calculations.get_iteration_criteria_value (irrep-aware 'enocc' branch)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ calculations.get_iteration_criteria_value (irrep-aware 'enocc' branch)  │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestEnoccByIrrep:
 
@@ -110,9 +111,9 @@ class TestEnoccByIrrep:
         assert val == pytest.approx(2 * (-2.0 + -1.0))
 
 
-# ---------------------------------------------------------------------------
-# maskutil.expand_mask (symmetry-aware mode)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ maskutil.expand_mask (symmetry-aware mode)                              │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 @pytest.fixture(scope="module")
 def h2o_c2v_scf_data(h2o_sto3g_c2v):
@@ -207,11 +208,11 @@ class TestExpandMaskSymmetryAware:
             )
 
 
-# ---------------------------------------------------------------------------
-# adb.find_subspace (symmetry-aware mode) -- validation only; the search
-# itself is exercised (slowly) via TestExpandMaskSymmetryAware above and via
-# adaptive_basis/vsap_symmetry_check/ for the real FeF3/aug-pc-2 case.
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.find_subspace (symmetry-aware mode) -- validation only; the search  │
+# │ itself is exercised (slowly) via TestExpandMaskSymmetryAware above and  │
+# │ via adaptive_basis/vsap_symmetry_check/ for the real FeF3/aug-pc-2 case.│
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestFindSubspaceSymmetryAware:
 
@@ -264,9 +265,9 @@ class TestFindSubspaceSymmetryAware:
             )
 
 
-# ---------------------------------------------------------------------------
-# calculations.diagonalize_masked
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ calculations.diagonalize_masked                                         │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestDiagonalizeMasked:
 
@@ -309,9 +310,9 @@ class TestDiagonalizeMasked:
         assert set(orbsym2.tolist()) <= set(shellsep_mol.irrep_name)
 
 
-# ---------------------------------------------------------------------------
-# adb.get_occupied_orbitals
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.get_occupied_orbitals                                               │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestGetOccupiedOrbitals:
 
@@ -352,9 +353,9 @@ class TestGetOccupiedOrbitals:
                 np.array([-1.0]), nocc=(1, 1), irrep_nelec={'A1': 2})
 
 
-# ---------------------------------------------------------------------------
-# find_subspace(track_orbitals=True)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ find_subspace(track_orbitals=True)                                      │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestTrackOrbitals:
 
@@ -415,9 +416,9 @@ class TestTrackOrbitals:
                        for _, irrep in entry["orbitals"])
 
 
-# ---------------------------------------------------------------------------
-# ioutil.write_orbital_history
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ ioutil.write_orbital_history                                            │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestWriteOrbitalHistory:
 
@@ -437,9 +438,9 @@ class TestWriteOrbitalHistory:
         assert content[4] == "8,-1.600000000000,A1"
 
 
-# ---------------------------------------------------------------------------
-# adb.get_occupied_orbitals_from_scf
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.get_occupied_orbitals_from_scf                                      │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestGetOccupiedOrbitalsFromSCF:
 
@@ -479,9 +480,9 @@ class TestGetOccupiedOrbitalsFromSCF:
         assert all(irrep is None for _, irrep in occ)
 
 
-# ---------------------------------------------------------------------------
-# adb.mask_analysis(track_orbitals=True)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.mask_analysis(track_orbitals=True)                                  │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 @pytest.mark.slow
 class TestMaskAnalysisTrackOrbitals:
