@@ -4,14 +4,14 @@ from copy import deepcopy
 from adb import find_subspace, expand_mask
 
 
-# ---------------------------------------------------------------------------
-# Fixtures
-#
-# All tests here use H2O/STO-3G.  STO-3G has one contraction per shell, so
-# mol.nao == create_shell_separated_mol(mol).nao.  This keeps the Fock/overlap
-# matrices, the masks, and the hcore all consistently sized throughout — no
-# contraction-expansion mismatch to reason about.
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ Fixtures                                                                │
+# │                                                                         │
+# │ All tests here use H2O/STO-3G.  STO-3G has one contraction per shell,   │
+# │ so mol.nao == create_shell_separated_mol(mol).nao. This keeps the       │
+# │ Fock/overlap matrices, the masks, and the hcore all consistently sized  │
+# │ throughout — no contraction-expansion mismatch to reason about.         │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 @pytest.fixture(scope="module")
 def h2o_sto3g_mf(h2o_sto3g):
@@ -55,9 +55,9 @@ def initial_mask(scf_data):
     return mask
 
 
-# ---------------------------------------------------------------------------
-# adb.expand_mask
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.expand_mask                                                         │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestExpandMask:
 
@@ -126,9 +126,9 @@ class TestExpandMask:
         assert np.all(mask)
 
 
-# ---------------------------------------------------------------------------
-# adb.find_subspace
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.find_subspace                                                       │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 @pytest.mark.slow
 class TestFindSubspace:
