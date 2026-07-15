@@ -4,7 +4,7 @@ import sys
 import os
 import argparse
 
-sys.path.append("../adbmodule/")
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import adb
 from pyscf import scf, gto
 import numpy as np
