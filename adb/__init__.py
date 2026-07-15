@@ -8,7 +8,6 @@ adb.atomic_block_util.
 """
 
 from .core import (
-    get_sub_scf_attributes,
     get_occupied_orbitals,
     get_occupied_orbitals_from_scf,
     atomic_block_minimal_basis,
