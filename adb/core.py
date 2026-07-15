@@ -3,15 +3,23 @@
 import numpy as np
 from pyscf.scf.addons import project_dm_nr2nr
 from pyscf import gto, scf, symm
-from warnings import warn
 from operator import itemgetter
 import copy
-import sys
 from .calculations import eig, get_iteration_criteria_value, get_q_sqrd, dual_basis_energy_correction, diagonalize_masked, spherical_average
 from .maskutil import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label, mask_matrix, link_shells
 from .molutil import create_shell_separated_mol, basis_functions_per_atom, funcs_on_shell, get_array_of_angular_momenta_and_atom_id
 from .basisutil import extract_basis
-from .ioutil import print_data_header, print_data, function_labels_from_mask
+from .ioutil import (
+    print_data_header, print_data, function_labels_from_mask,
+    print_atomic_block_atom_header, print_atomic_block_energies_debug,
+    print_restricted_atom_orbital_summary, print_unrestricted_atom_orbital_summary,
+    print_atomic_block_state_energies,
+    print_find_subspace_start, warn_conflicting_initialization,
+    print_projection_initialization_message,
+    print_mask_analysis_init_header, print_mask_history_label,
+    print_minimal_basis_summary, print_initialization_footer,
+    print_link_shells_notice, print_subbasis_scf_not_converged_warning,
+)
 from .CONSTANTS import NFUNCS, EXPAND_MASK_EPS, ELEMENTS
 
 
@@ -212,8 +220,6 @@ def atomic_block_minimal_basis(
     nfuncs_min_tot = 0
     for i,funcs_and_atom in enumerate(zip(func_per_atom, atoms)):
         nfuncs, atom = funcs_and_atom
-        if verbose:
-            print(f'{atom=}')
         smask_atom = list(filter(lambda x: x[3][0] == i, smask))
         mask = np.zeros(mol.nao, dtype=bool)
         mask_atom = np.zeros(func_per_atom[i], dtype=bool)
@@ -226,8 +232,7 @@ def atomic_block_minimal_basis(
         nfunc_per_minimal_atom = int(np.ceil(
             (ELEMENTS.index(atom)-mol.atom_nelec_core(i)) / 2))
         if verbose:
-            print(f'{nfunc_per_minimal_atom=}')
-            print(f'{nfuncs=}')
+            print_atomic_block_atom_header(atom, nfunc_per_minimal_atom, nfuncs)
         # Add to molecule minimal number of functions
         nfuncs_min_tot += nfunc_per_minimal_atom
         
@@ -239,7 +244,7 @@ def atomic_block_minimal_basis(
 
         def number_of_states(energies, thresh=1e-3):
             if verbose:
-                print(f'{energies=}')
+                print_atomic_block_energies_debug(energies)
             nfuncs_include = nfunc_per_minimal_atom
             # Handle degeneracies
             while nfuncs_include < nfuncs \
@@ -251,8 +256,7 @@ def atomic_block_minimal_basis(
         if restricted:
             nocca, noccb = number_of_states(e_atom), number_of_states(e_atom)
             if verbose:
-                print(f'{nocca=}, {noccb=}')
-                print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
+                print_restricted_atom_orbital_summary(nocca, noccb, e_atom)
             occs = np.zeros(c_atom.shape[1])
             occs[:nocca] = 2
             P_atom = np.abs(
@@ -261,8 +265,7 @@ def atomic_block_minimal_basis(
         else:
             nocca, noccb = number_of_states(e_atom[0]), number_of_states(e_atom[1])
             if verbose:
-                print(f'Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV')
-                print(f'Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV')
+                print_unrestricted_atom_orbital_summary(nocca, noccb, e_atom)
             occs = np.zeros((2, c_atom.shape[2]))
             occs[0, :nocca] = 1
             occs[1, :noccb] = 1
@@ -272,18 +275,7 @@ def atomic_block_minimal_basis(
                 )
         Qlim = nocca+noccb
         if verbose:
-            print(f'{Qlim=}')
-
-        if verbose:
-            with np.printoptions(precision=2, suppress=True):
-                if restricted:
-                    print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
-                    print(f'Occupied state energies [eV]: {e_atom[:nocca]*27.2114}')
-                else:
-                    print(f'Bound alpha state energies [eV]: {e_atom[0, e_atom[0,:]<0]*27.2114}')
-                    print(f'Bound beta  state energies [eV]: {e_atom[1, e_atom[1,:]<0]*27.2114}')
-                    print(f'Occupied alpha state energies [eV]: {e_atom[0, :nocca]*27.2114}')
-                    print(f'Occupied beta  state energies [eV]: {e_atom[1, :noccb]*27.2114}')
+            print_atomic_block_state_energies(Qlim, e_atom, nocca, noccb, restricted)
 
         atom_indices = set()
         Q = 0
@@ -575,12 +567,12 @@ def find_subspace(
                 "depends on.")
 
     if verbose:
-        print('Running find_subspace for mol ', mol.atom)
+        print_find_subspace_start(mol)
     scf_obj_copy = scf_obj.copy()
     fullbasis_mol = create_shell_separated_mol(mol)
 
     if abd_initialization and initialize_by_projection:
-        warn("Both 'abd_initialization' and 'initialize_by_projection' cannot be True simultaneously.\nInitialization by projection takes precedent.")
+        warn_conflicting_initialization()
 
     # mask or smask initialization
     is_restricted = len(F.shape) == 2
@@ -598,7 +590,8 @@ def find_subspace(
             verbose=verbose)
         mask_init_idx = np.where(mask)[0]
     elif initialize_by_projection:
-        print("--- Initializing the dual basis by minimal basis projection ---")
+        if verbose:
+            print_projection_initialization_message()
         mask = find_projected_minimal_basis_mask(mol)
         mask_init_idx = np.where(mask)[0]
     else:
@@ -672,7 +665,6 @@ def find_subspace(
     while True and not np.all(mask):
         mask, difference, current_criteria_val, n_added, smask = expand_mask(
             F, S, nocc, mask,
-            hcore=scf_obj_copy.get_hcore(),
             Cfull=scf_obj_copy.mo_coeff,
             smask=smask, variant=variant, link_shells=link_shells,
             nfunc_normalisation=nfunc_normalisation,
@@ -1049,7 +1041,7 @@ def mask_analysis(
 
     if verbose:
         init_method = mask_history_init[0][3]
-        print('\n' + 20*'#' + ' INITIALIZATION: ' + f'{init_method.upper():<30s} ' + 33*'#')
+        print_mask_analysis_init_header(init_method)
         i = 1
         for mask_i, current_val, difference, *init in mask_history_init:
             if is_smask:
@@ -1065,23 +1057,19 @@ def mask_analysis(
                 aolabels = [aolabels[i] for i in changes]
                 label = ' '.join(aolabels)
                 last_mask = mask
-            print(f'{label},  ', end='')
-            if i % 10 == 0: print()
+            print_mask_history_label(label, i)
             i += 1
         if is_smask:
             minimal_mask = smask_to_mask(mask_history_init[-1][0], mol.cart)
         else:
             minimal_mask = mask_history_init[-1][0]
-        print(np.sum(minimal_mask))
-        print(function_labels_from_mask(minimal_mask, mol))
-        
-        print('\nNumber of toggled functions:', np.sum(last_mask))
-        print(20*'#' + ' INITIALIZATION END ' + 61*'#')
+        print_minimal_basis_summary(minimal_mask, mol)
+
+        print_initialization_footer(np.sum(last_mask))
 
         if link_shells:
-            print('\nLink shells: ON')
-            print('Additional functions may be added due to shell linking!')
-        
+            print_link_shells_notice()
+
         print_data_header()
 
     for mask_i, current_val, difference, *init in mask_history:
@@ -1214,7 +1202,7 @@ def mask_analysis(
 
 
             if not submf.converged:
-                print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
+                print_subbasis_scf_not_converged_warning()
         else:
             mask = mask_i
             e, subbasis_coeffs = eig(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
