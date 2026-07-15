@@ -10,7 +10,7 @@ from .maskutil import init_smask, mask_to_smask, smask_to_mask, set_linked_shell
 from .molutil import create_shell_separated_mol, basis_functions_per_atom, funcs_on_shell, get_array_of_angular_momenta_and_atom_id
 from .basisutil import extract_basis
 from .ioutil import (
-    print_data_header, print_data, function_labels_from_mask,
+    print_data_header, print_data, print_data_footer, function_labels_from_mask,
     print_atomic_block_atom_header, print_atomic_block_energies_debug,
     print_restricted_atom_orbital_summary, print_unrestricted_atom_orbital_summary,
     print_atomic_block_state_energies,
@@ -1248,6 +1248,9 @@ def mask_analysis(
         last_mask = copy.deepcopy(mask)
         if is_smask:
             last_smask = copy.deepcopy(smask)
+
+    if verbose:
+        print_data_footer()
 
     if track_orbitals:
         return dataframe, orbital_history
