@@ -281,8 +281,6 @@ def run_abs(
                     mask_analysis_result = adb.mask_analysis(
                         smaskhistory, shellsep_mol, myhf,
                         F, S, dft = dft, xc = xc, grid_level = grid_level,
-                        molfname = molfilename,
-                        sym_occ_fname = symmetry_occ_fname,
                         C_full = mo_coeff_scf,
                         calculate_correction = calculate_DB_correction,
                         irrep_nelec = irrep_nelec,
