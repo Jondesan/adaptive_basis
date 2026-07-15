@@ -6,16 +6,18 @@ import copy
 import argparse
 import fcntl
 
+sys.path.append(os.path.join(os.path.dirname(__file__), ".."))
 import adb
+from adb.ioutil import get_molecules_in_dir
 from pyscf import scf, gto
 import numpy as np
 import pandas as pd
 import datetime
 import pyscf
 from time import time
-import adbutils
+# import adbutils
 import re
-import atomic_block_util
+# import atomic_block_util
 
 AVAIL_INIT_METHODS = [
     'scf',
@@ -39,105 +41,6 @@ def get_files_in_folder(folder: str):
     return files
 
 
-def point_group_from_file(path, mol_filename):
-    """ Looks through file at 'path' for the point group label of a molecule
-    with filename 'mol_filename'. If not found, return True.
-    """
-    pnt_grp = True
-    print(f'Reading file with point group information at path {path}')
-    print(f'Searching for point group match for molecule with filename {mol_filename}')
-    with open(path, 'r') as file:
-        for line in file:
-            name, point_grp_label = line.split()
-            if mol_filename == name:
-                pnt_grp = point_grp_label
-                print(f'Found point group {pnt_grp} for molecule with filename {mol_filename}')
-    
-    return pnt_grp
-
-def get_molecules_in_dir(
-    molpath: str,
-    basis_sets: list,
-    get_decontractions: bool = False,
-    unit = 'Angstrom',
-    symmetry: bool | str = False,
-    symmetry_fname = None
-):
-    """Get molecule xyz files from molpath, can be directory or single file.
-    """
-    prefix = molpath
-
-
-    if os.path.isdir(prefix):
-        fs = get_files_in_folder(prefix)
-        fs = [prefix + '/' + f for f in fs]
-    else:
-        fs = [molpath]
-    molecules = []
-    for fn in fs:
-        molfname = fn.split("/")[-1]
-        if molfname[0] == "#": # If mol fname starts with #, skip file
-            continue
-        print(f"reading file {fn}")
-
-        if symmetry_fname is not None:
-            symm = point_group_from_file(symmetry_fname, molfname)
-        else:
-            symm = symmetry
-
-        for bs in basis_sets:
-            for unc in (
-                ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
-            ):
-                fnparts = fn.split('/')[-1].split('.')
-                if len(fnparts) > 2:
-                    charge = [int(substring.replace('charge', '')) for substring in fnparts if 'charge' in substring]
-                    charge = charge[0] if len(charge) != 0 else 0
-                    spin = [int(substring.replace('spin','')) for substring in fnparts if 'spin' in substring]
-                    spin = spin[0] if len(spin) != 0 else None
-                else:
-                    charge = 0
-                    spin = None
-
-                try:
-                    mol = gto.M(
-                        atom=fn,
-                        basis=unc + bs,
-                        ecp=unc + bs,
-                        charge=charge,
-                        spin=spin,
-                        unit=unit,
-                        symmetry=symm,
-                        verbose=0,
-                    )
-                except:
-                    mol = gto.M(
-                        atom=fn,
-                        basis=unc + bs,
-                        charge=charge,
-                        spin=spin,
-                        unit=unit,
-                        symmetry=symm,
-                        verbose=0,
-                    )
-                # if symmetry_fname is not None:
-                #     mol.irrep_name = list(irrep_occs.keys())
-                mol = adb.create_shell_separated_mol(mol, verbose=mol.verbose)
-                smask = adb.init_smask(mol)
-                print(f'Created molecule {molfname}, with charge {charge}, spin {spin} and symmetry set at {symm}')
-                molecules.append(
-                    [fn.split("/")[-1], mol, adb.create_shell_separated_mol(mol), smask, None, bs]
-                )
-
-    # Sort by number of electrons, then by the basis, then by number of basis fcts
-    molecules.sort(key=lambda x: (x[1].tot_electrons(), x[1].basis, x[1].nao_nr()))
-    print(
-        f"read a total of {len(molecules)} molecular structures, with the following numbers of functions: {[int(m[1].nao_nr()) for m in molecules]}"
-    )
-    print(f"with filenames {[name[0] for name in molecules]}")
-    return molecules
-
-
 def add_initial_guesses(ig_list, mol_list):
     if mol_list is None:
         mol_list = ig_list
@@ -158,7 +61,6 @@ def run_abs(
     xc='pbe,pbe',
     grid_level=7,
     abd_init=True,
-    use_psi4=True,
     symmetry_occ_fname=None,
     q_tol=1.0,
     ODIR="output",
@@ -217,22 +119,9 @@ def run_abs(
 
         is_restricted = mol.spin == 0
 
-        if use_psi4:
-            _, docc, socc, wfn_full, irrep_labels, irrep_symb = adbutils.psi4_fullbasis(
-                mol,
-                basis=basis,
-                init_guess=init_guess,
-                dft=dft, xc=xc
-            )
-            AOCC = wfn_full.nalphapi().to_tuple()
-            BOCC = wfn_full.nbetapi().to_tuple()
-            symmetry_occs = list(zip(irrep_labels, AOCC, BOCC))
-            # Create symmetry occupation dict
-            #             IRREP: 2*alpha                      (alpha, beta)
-            # Example:    'A1':  1                            (2, 2)
-            irrep_nelec = {x[0]: 2*x[1] if is_restricted else (x[1], x[2]) for x in symmetry_occs}
+        
         if symmetry_occ_fname is not None:
-            irrep_nelec, _ = adbutils.read_symmetry_occs_from_file(
+            irrep_nelec, _ = adb.ioutil.read_symmetry_occs_from_file(
                 symmetry_occ_fname, molfname=molfilename)
         
         # Set up Hartree-Fock, remove linear dependencies from basis
@@ -437,7 +326,7 @@ def run_abs(
 
 
 def print_labels_of_functions_in_mask(mask, mol):
-    atom_dict = atomic_block_util.function_labels_from_mask(mask, mol)
+    atom_dict = adb.ioutil.function_labels_from_mask(mask, mol)
 
     print('\n\nFunctions in the pseudominimal basis:')
     for key, elem in atom_dict.items():
@@ -522,7 +411,7 @@ def run_atomic_block_decomp_on_molecule_set(
 
                 for sapbs in sapbases:
                     if init_guess != 'vsap':
-                        mf.sap_basis = sap_basis
+                        mf.sap_basis = sapbs
                     dm0 = mf.get_init_guess(key=init_guess)
                     # we need the corresponding Fock matrix
                     F = mf.get_fock(dm=dm0)
@@ -736,40 +625,6 @@ def compute_fullbasis_criterion(
     return results
 
 
-def run_occupations(
-    mol_list,
-    dft=False,
-    xc='b3lyp',
-    grid_level=7):
-
-    print('molfilename;occs;irrep_symbol')
-    for molfilename, mol, shellsep_mol, shells, init_guess, basisname in mol_list:
-        print(molfilename, end=';')
-        
-        init_guess = 'atom'
-
-        # Set up Hartree-Fock, remove linear dependencies from basis
-        is_restricted = mol.spin == 0
-
-        _, docc, socc, wfn_full, irrep_labels, irrep_symb = adbutils.psi4_fullbasis(
-            mol,
-            basis=basis,
-            init_guess=init_guess,
-            dft=dft, xc=xc, verbose=True
-        )
-        AOCC = wfn_full.nalphapi().to_tuple()
-        BOCC = wfn_full.nbetapi().to_tuple()
-        symmetry_occs = list(zip(irrep_labels, AOCC, BOCC))
-        # Create symmetry occupation dict
-        #             IRREP: 2*alpha                      (alpha, beta)
-        # Example:    'A1':  1                            (2, 2)
-        irrep_nelec = {x[0]: 2*x[1] if is_restricted else (x[1], x[2]) for x in symmetry_occs}
-
-        print(f'{irrep_nelec};{irrep_symb.capitalize().rstrip()}')
-
-    return None
-
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description="Run adaptive basis Hartree-Fock calculations."
@@ -839,12 +694,6 @@ if __name__ == "__main__":
         help="Initialize with atomic block decomposition, optional. Default is True.",
     )
     parser.add_argument(
-        "--use_psi4",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Use Psi4 for SCF calculations instead of PySCF, optional. Default is False.",
-    )
-    parser.add_argument(
         "--q_tol", type=float, required=False, default=1.0,
         help="charge tolerance, default 1.0"
     )
@@ -860,7 +709,7 @@ if __name__ == "__main__":
         "--run_mode",
         type=str,
         default='abs',
-        choices=['abs', 'occs', 'abd', 'full_crit'],
+        choices=['abs', 'abd', 'full_crit'],
         help="Run mode, optional. Default is 'abs'.",
     )
     parser.add_argument(
@@ -929,7 +778,6 @@ if __name__ == "__main__":
     dft = args.dft
     unit = args.unit
     abd_init = args.abd
-    use_psi4 = args.use_psi4
     q_tol = args.q_tol
     sym_occ_file = args.sym_occ_file
     pnt_grp_file = args.point_group_file
@@ -988,7 +836,6 @@ if __name__ == "__main__":
                 sap_basis_sets = sapbasis,
                 nfunc_normalisation = nfunc_norm,
                 dft = dft, abd_init = abd_init,
-                use_psi4 = use_psi4,
                 symmetry_occ_fname = sym_occ_file,
                 q_tol = q_tol,
                 ODIR = odir,
@@ -996,10 +843,6 @@ if __name__ == "__main__":
                 symmetry_aware_search = symmetry_aware_search,
                 track_orbitals = track_orbitals,
                 )
-        case 'occs':
-            run_occupations(
-                mols,
-                dft=dft, xc='b3lyp')
         case 'abd':
             run_atomic_block_decomp_on_molecule_set(
                 mols,
