@@ -7,7 +7,11 @@ from operator import itemgetter
 import copy
 from .calculations import eig, get_iteration_criteria_value, get_q_sqrd, dual_basis_energy_correction, diagonalize_masked, spherical_average
 from .maskutil import init_smask, mask_to_smask, smask_to_mask, set_linked_shells, linked_shell_idx, get_atom_shell_label, mask_matrix, link_shells
-from .molutil import create_shell_separated_mol, basis_functions_per_atom, funcs_on_shell, get_array_of_angular_momenta_and_atom_id
+from .molutil import (
+    create_shell_separated_mol, basis_functions_per_atom,
+    funcs_on_shell, get_array_of_angular_momenta_and_atom_id,
+    create_mol_from_template
+    )
 from .basisutil import extract_basis
 from .ioutil import (
     print_data_header, print_data, print_data_footer, function_labels_from_mask,
@@ -346,27 +350,8 @@ def find_projected_minimal_basis_mask(
     ):
     from pyscf.gto.mole import intor_cross, aoslice_by_atom
     from pyscf.gto import Mole
-    try:
-        mol_sto3g = Mole(
-            atom = mol.atom,
-            basis = 'sto3g',
-            ecp = mol.ecp,
-            spin = mol.spin,
-            charge = mol.charge,
-            cart = mol.cart,
-            unit = mol.unit,
-            symmetry = mol.symmetry,
-        ).build()
-    except:
-        mol_sto3g = Mole(
-            atom = mol.atom,
-            basis = 'sto3g',
-            spin = mol.spin,
-            charge = mol.charge,
-            cart = mol.cart,
-            unit = mol.unit,
-            symmetry = mol.symmetry,
-        ).build()
+
+    mol_sto3g = create_mol_from_template(mol, basis='sto3g')
     mask = np.zeros(mol.nao_nr(), dtype=bool)    
     s21 = intor_cross('int1e_ovlp', mol, mol_sto3g)
 
@@ -384,7 +369,6 @@ def find_projected_minimal_basis_mask(
     prev_aid = None
     shell_offset = 0
 
-    ao_labels = mol.ao_labels()
     for (ovlp_col, angl, atom_id) in zip(s21.T, sto3g_angls, sto3g_aid):
         # Count functions of angular momentum angl in large basis
         # for the current atom
