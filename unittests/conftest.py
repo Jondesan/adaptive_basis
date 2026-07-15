@@ -3,7 +3,7 @@ import os
 import pytest
 import pyscf
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'adbmodule'))
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 
 def pytest_configure(config):
     config.addinivalue_line(

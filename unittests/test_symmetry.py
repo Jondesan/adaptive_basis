@@ -3,16 +3,14 @@ import copy
 import numpy as np
 import pytest
 
-import CONSTANTS
 from adb import \
     find_subspace, expand_mask, get_occupied_orbitals, \
-    get_occupied_orbitals_from_scf, mask_analysis
-from calculations import \
+    get_occupied_orbitals_from_scf, mask_analysis, \
     eig, diagonalize_masked, symmetrized_eig, \
-    get_iteration_criteria_value
-from molutil import create_shell_separated_mol
-from maskutil import init_smask, set_linked_shells, smask_to_mask
-from ioutil import write_orbital_history
+    get_iteration_criteria_value, \
+    create_shell_separated_mol, \
+    init_smask, set_linked_shells, smask_to_mask, \
+    write_orbital_history, CONSTANTS
 import pyscf
 
 

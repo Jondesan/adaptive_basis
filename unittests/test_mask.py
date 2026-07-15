@@ -1,5 +1,5 @@
 import numpy as np
-from maskutil import init_smask, smask_to_mask, mask_to_smask, mask_matrix
+from adb import init_smask, smask_to_mask, mask_to_smask, mask_matrix
 
 
 # ╭─────────────────────────────────────────────────────────────────────────╮
