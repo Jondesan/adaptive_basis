@@ -6,6 +6,14 @@ import os
 import sys
 from warnings import warn
 from pyscf.gto import Mole
+from rich.console import Console
+from rich.table import Table
+from rich.panel import Panel
+from rich import box
+
+_console = Console()
+_err_console = Console(stderr=True)
+
 
 def get_files_in_folder(folder: str):
     """Get all files in folder.
@@ -47,7 +55,7 @@ def get_molecules_in_dir(
         molfname = fn.split("/")[-1]
         if molfname[0] == "#": # If mol fname starts with #, skip file
             continue
-        print(f"reading file {fn}")
+        _console.print(f"Reading file {fn}", style="cyan", markup=False)
 
         if symmetry_fname is not None:
             symm = point_group_from_file(symmetry_fname, molfname)
@@ -79,7 +87,7 @@ def get_molecules_in_dir(
                 # If only None in ecp dict, set object to None so
                 # pyscf interprets it correctly
                 ecp_bs = None if not ecp_bs else ecp_bs
-                print(f"{ecp_bs=}")
+                _console.print(f"{ecp_bs=}", style="dim", markup=False)
 
                 mol = Mole(
                     atom=fn,
@@ -91,20 +99,27 @@ def get_molecules_in_dir(
                     symmetry=symm,
                     verbose=0,
                 ).build()
-                
+
                 mol = create_shell_separated_mol(mol, verbose=mol.verbose)
                 smask = init_smask(mol)
-                print(f'Created molecule {molfname}, with charge {charge}, spin {spin} and symmetry set at {symm}')
+                _console.print(
+                    f"Created molecule {molfname}, with charge {charge}, "
+                    f"spin {spin} and symmetry set at {symm}",
+                    style="green", markup=False)
                 molecules.append(
                     [fn.split("/")[-1], mol, create_shell_separated_mol(mol), smask, None, bs]
                 )
 
     # Sort by number of electrons, then by the basis, then by number of basis fcts
     molecules.sort(key=lambda x: (x[1].tot_electrons(), x[1].basis, x[1].nao_nr()))
-    print(
-        f"read a total of {len(molecules)} molecular structures, with the following numbers of functions: {[int(m[1].nao_nr()) for m in molecules]}"
-    )
-    print(f"with filenames {[name[0] for name in molecules]}")
+
+    table = Table(title=f"Loaded {len(molecules)} molecular structures", box=box.ROUNDED)
+    table.add_column("Molecule")
+    table.add_column("# functions", justify="right")
+    for name, mol_, *_rest in molecules:
+        table.add_row(name, str(int(mol_.nao_nr())))
+    _console.print(table)
+
     return molecules
 
 
@@ -113,15 +128,21 @@ def point_group_from_file(path, mol_filename):
     with filename 'mol_filename'. If not found, return True.
     """
     pnt_grp = True
-    print(f'Reading file with point group information at path {path}')
-    print(f'Searching for point group match for molecule with filename {mol_filename}')
+    _console.print(
+        f"Reading file with point group information at path {path}",
+        style="dim", markup=False)
+    _console.print(
+        f"Searching for point group match for molecule with filename {mol_filename}",
+        style="dim", markup=False)
     with open(path, 'r') as file:
         for line in file:
             name, point_grp_label = line.split()
             if mol_filename == name:
                 pnt_grp = point_grp_label
-                print(f'Found point group {pnt_grp} for molecule with filename {mol_filename}')
-    
+                _console.print(
+                    f"Found point group {pnt_grp} for molecule with filename {mol_filename}",
+                    style="green", markup=False)
+
     return pnt_grp
 
 
@@ -130,7 +151,7 @@ def read_symmetry_occs_from_file(fname: str, molfname: str):
     with matching molecule filename.
 
     File is expected to follow this format:
-    
+
     molfilename;occs
     h2.charge0.spin0.xyz;{'Ag': 2, 'B1g': 0, 'B2g': 0, 'B3g': 0, 'Au': 0, 'B1u': 0, 'B2u': 0, 'B3u': 0}
     ch4.charge0.spin0.xyz;{'A1': 6, 'A2': 0, 'B1': 2, 'B2': 2}
@@ -138,10 +159,10 @@ def read_symmetry_occs_from_file(fname: str, molfname: str):
 
     """
     from ast import literal_eval
-    
+
     if fname is None or not os.path.isfile(fname):
         return None, None
-    
+
     file = None
     with open(fname, 'r') as f:
         file = f.readlines()
@@ -177,11 +198,45 @@ def write_orbital_history(
                 f.write(f"{nfunc},{energy:.12f},{irrep if irrep is not None else ''}\n")
 
 
+# Column spec driving the streaming ADB-iteration table (print_data_header/
+# print_data). Add a column by adding one tuple here and threading the
+# value through print_data's `values` dict below -- no width arithmetic
+# needs touching anywhere else.
+_DATA_COLUMNS = [
+    # (key, header label, width, justify, value format)
+    ("nfunc",    "N_func",       10, ">", "d"),
+    ("label",    "New funcs",    13, ">", ""),
+    ("criteria", "Criteria val", 16, ">", ".9f"),
+    ("diff",     "Difference",   15, ">", ".9f"),
+    ("e_scf",    "E_subbasSCF",  15, ">", ".9f"),
+    ("qsqrd",    "Q^2",          18, ">", ".12f"),
+]
+
+
+def _format_value(value, width, justify, fmt):
+    if isinstance(value, str):
+        return f"{value:{justify}{width}}"
+    return f"{value:{justify}{width}{fmt}}"
+
+
 def print_data_header() -> None:
-    print(
-            f'\n{"N_func":>10s}  {"New funcs":>12s}  {"Criteria val":>15s}' +\
-            f'  {"Difference":>15s}  {"E_subbasSCF":>15s}  {"Q^2":>18s}'
-        )
+    widths = [width for _, _, width, _, _ in _DATA_COLUMNS]
+    top = "╭" + "┬".join("─" * (w + 2) for w in widths) + "╮"
+    sep = "├" + "┼".join("─" * (w + 2) for w in widths) + "┤"
+    header = "│" + "│".join(
+        f" {label:{justify}{w}} " for _, label, w, justify, _ in _DATA_COLUMNS
+    ) + "│"
+
+    _console.print()
+    _console.print(top, style="bold", markup=False, soft_wrap=True)
+    _console.print(header, style="bold", markup=False, soft_wrap=True)
+    _console.print(sep, style="bold", markup=False, soft_wrap=True)
+
+
+def print_data_footer() -> None:
+    widths = [width for _, _, width, _, _ in _DATA_COLUMNS]
+    bottom = "╰" + "┴".join("─" * (w + 2) for w in widths) + "╯"
+    _console.print(bottom, style="bold", markup=False, soft_wrap=True)
 
 
 def print_data(
@@ -193,7 +248,7 @@ def print_data(
     Qsqrd:              float | str = "-",
     print_header:       bool        = False ) -> None:
     """Data printout function
-    
+
     """
 
     if print_header:
@@ -204,12 +259,28 @@ def print_data(
     if Qsqrd is None:
         Qsqrd = "-"
 
-    print(f"{sum(mask):10d}", end="")
-    print(f" {ao_or_shell_label:>13s}", end="")
-    print(f" {criteria_value:16.9f}", end="")
-    print(f'  {diff:{">15s" if isinstance(diff, str) else "15.9f"}}', end="")
-    print(f'  {E_scf:{">15s" if isinstance(E_scf, str) else "15.9f"}}', end="")
-    print(f'  {Qsqrd:{">15s" if isinstance(Qsqrd, str) else "18.12f"}}')
+    values = {
+        "nfunc":    sum(mask),
+        "label":    ao_or_shell_label,
+        "criteria": criteria_value,
+        "diff":     diff,
+        "e_scf":    E_scf,
+        "qsqrd":    Qsqrd,
+    }
+    cells = [
+        f" {_format_value(values[key], width, justify, fmt)} "
+        for key, _, width, justify, fmt in _DATA_COLUMNS
+    ]
+    _console.print("│" + "│".join(cells) + "│", markup=False, soft_wrap=True)
+
+
+def _print_atom_function_table(atom_dict: dict) -> None:
+    table = Table(box=box.SIMPLE)
+    table.add_column("Atom")
+    table.add_column("Functions")
+    for key, elem in atom_dict.items():
+        table.add_row(key, ", ".join(elem))
+    _console.print(table)
 
 
 def print_labels_of_functions_in_mask(
@@ -228,19 +299,16 @@ def print_labels_of_functions_in_mask(
         minimal_mol.build()
         minimal_mask = numpy.ones(minimal_mol.nao_nr(), dtype=bool)
 
-        print("\nFunctions in the 'actual' minimal basis:")
+        _console.print("\nFunctions in the 'actual' minimal basis:", style="bold", markup=False)
         minimal_atom_dict = function_labels_from_mask(minimal_mask, minimal_mol)
         # Sort dictionary by the internal atom index
         minimal_atom_dict = dict(sorted(
             minimal_atom_dict.items(),
             key=lambda item: int(item[0].split()[0])))
-        for key, elem in minimal_atom_dict.items():
-            print(f'{key}: {elem}')
+        _print_atom_function_table(minimal_atom_dict)
 
-    print('\nFunctions in the pseudominimal basis:')
-    for key, elem in atom_dict.items():
-        print(f'{key}: {elem}')
-    print()
+    _console.print("\nFunctions in the pseudominimal basis:", style="bold", markup=False)
+    _print_atom_function_table(atom_dict)
 
 
 def orbital_key(orb):
@@ -258,8 +326,8 @@ def orbital_key(orb):
 
 
 def function_labels_from_mask(mask, mol):
-    """ Return a dictionary with all 
-    
+    """ Return a dictionary with all
+
     """
     from pyscf.gto.mole import cart_labels, sph_labels
     import re
@@ -296,40 +364,58 @@ def function_labels_from_mask(mask, mol):
 
 
 def print_atomic_block_atom_header(atom, nfunc_per_minimal_atom, nfuncs):
-    print(f'{atom=}')
-    print(f'{nfunc_per_minimal_atom=}')
-    print(f'{nfuncs=}')
+    _console.print(f"{atom=}", style="dim", markup=False)
+    _console.print(f"{nfunc_per_minimal_atom=}", style="dim", markup=False)
+    _console.print(f"{nfuncs=}", style="dim", markup=False)
 
 
 def print_atomic_block_energies_debug(energies):
-    print(f'{energies=}')
+    _console.print(f"{energies=}", style="dim", markup=False)
 
 
 def print_restricted_atom_orbital_summary(nocca, noccb, e_atom):
-    print(f'{nocca=}, {noccb=}')
-    print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
+    _console.print(f"{nocca=}, {noccb=}", style="dim", markup=False)
+    _console.print(
+        f"Energy of highest orbital {e_atom[nocca-1]*27.2114} eV",
+        style="dim", markup=False)
 
 
 def print_unrestricted_atom_orbital_summary(nocca, noccb, e_atom):
-    print(f'Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV')
-    print(f'Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV')
+    _console.print(
+        f"Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV",
+        style="dim", markup=False)
+    _console.print(
+        f"Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV",
+        style="dim", markup=False)
 
 
 def print_atomic_block_state_energies(Qlim, e_atom, nocca, noccb, restricted):
-    print(f'{Qlim=}')
+    _console.print(f"{Qlim=}", style="dim", markup=False)
     with numpy.printoptions(precision=2, suppress=True):
         if restricted:
-            print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
-            print(f'Occupied state energies [eV]: {e_atom[:nocca]*27.2114}')
+            _console.print(
+                f"Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}",
+                style="dim", markup=False)
+            _console.print(
+                f"Occupied state energies [eV]: {e_atom[:nocca]*27.2114}",
+                style="dim", markup=False)
         else:
-            print(f'Bound alpha state energies [eV]: {e_atom[0, e_atom[0,:]<0]*27.2114}')
-            print(f'Bound beta  state energies [eV]: {e_atom[1, e_atom[1,:]<0]*27.2114}')
-            print(f'Occupied alpha state energies [eV]: {e_atom[0, :nocca]*27.2114}')
-            print(f'Occupied beta  state energies [eV]: {e_atom[1, :noccb]*27.2114}')
+            _console.print(
+                f"Bound alpha state energies [eV]: {e_atom[0, e_atom[0,:]<0]*27.2114}",
+                style="dim", markup=False)
+            _console.print(
+                f"Bound beta  state energies [eV]: {e_atom[1, e_atom[1,:]<0]*27.2114}",
+                style="dim", markup=False)
+            _console.print(
+                f"Occupied alpha state energies [eV]: {e_atom[0, :nocca]*27.2114}",
+                style="dim", markup=False)
+            _console.print(
+                f"Occupied beta  state energies [eV]: {e_atom[1, :noccb]*27.2114}",
+                style="dim", markup=False)
 
 
 def print_find_subspace_start(mol):
-    print('Running find_subspace for mol ', mol.atom)
+    _console.print(f"Running find_subspace for mol {mol.atom}", style="bold cyan", markup=False)
 
 
 def warn_conflicting_initialization():
@@ -337,33 +423,48 @@ def warn_conflicting_initialization():
 
 
 def print_projection_initialization_message():
-    print("--- Initializing the dual basis by minimal basis projection ---")
+    _console.print(
+        "--- Initializing the dual basis by minimal basis projection ---",
+        style="cyan", markup=False)
 
 
 def print_mask_analysis_init_header(init_method):
-    print('\n' + 20*'#' + ' INITIALIZATION: ' + f'{init_method.upper():<30s} ' + 33*'#')
+    _console.print()
+    _console.print(
+        Panel(f"INITIALIZATION: {init_method.upper()}", style="bold", box=box.ROUNDED, expand=False))
 
 
 def print_mask_history_label(label, index):
-    print(f'{label},  ', end='')
+    _console.print(f"{label},  ", style="dim", end="", markup=False)
     if index % 10 == 0:
-        print()
+        _console.print()
 
 
 def print_minimal_basis_summary(minimal_mask, mol):
-    print(numpy.sum(minimal_mask))
-    print(function_labels_from_mask(minimal_mask, mol))
+    atom_dict = function_labels_from_mask(minimal_mask, mol)
+    atom_dict = dict(sorted(
+        atom_dict.items(),
+        key=lambda item: int(item[0].split()[0])))
+    _console.print(
+        f"\n{int(numpy.sum(minimal_mask))} functions in the initial basis:",
+        style="bold", markup=False)
+    _print_atom_function_table(atom_dict)
 
 
 def print_initialization_footer(num_toggled):
-    print('\nNumber of toggled functions:', num_toggled)
-    print(20*'#' + ' INITIALIZATION END ' + 61*'#')
+    _console.print(f"\nNumber of toggled functions: {num_toggled}", style="bold", markup=False)
+    _console.print(Panel("INITIALIZATION END", style="bold", box=box.ROUNDED, expand=False))
 
 
 def print_link_shells_notice():
-    print('\nLink shells: ON')
-    print('Additional functions may be added due to shell linking!')
+    _console.print()
+    _console.print("Link shells: ON", style="bold cyan", markup=False)
+    _console.print(
+        "Additional functions may be added due to shell linking!",
+        style="dim", markup=False)
 
 
 def print_subbasis_scf_not_converged_warning():
-    print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
+    _err_console.print(
+        "Warning: The SCF did not converge in the subbasis. Results may be unreliable.",
+        style="bold red", markup=False)
