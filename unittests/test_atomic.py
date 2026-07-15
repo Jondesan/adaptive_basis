@@ -1,7 +1,6 @@
 import pytest
 import numpy as np
-from adb import atomic_block_minimal_basis
-from molutil import basis_functions_per_atom
+from adb import atomic_block_minimal_basis, basis_functions_per_atom
 
 
 # ╭─────────────────────────────────────────────────────────────────────────╮

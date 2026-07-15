@@ -1,6 +1,6 @@
 import pytest
 import numpy as np
-from calculations import \
+from adb import \
     eig, get_iteration_criteria_value, \
     get_q_sqrd, spherical_average
 

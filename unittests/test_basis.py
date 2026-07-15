@@ -1,8 +1,6 @@
 import pytest
 from pyscf import gto
-from molutil import create_shell_separated_mol, create_subbasis_mol
-from maskutil import init_smask
-from basisutil import extract_basis
+from adb import create_shell_separated_mol, create_subbasis_mol, init_smask, extract_basis
 
 
 # ╭─────────────────────────────────────────────────────────────────────────╮
