@@ -67,7 +67,7 @@ class TestExpandMask:
         d = scf_data
         result = expand_mask(
             d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
-            hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
+            Cfull=d["Cfull"], variant="enocc",
         )
         assert len(result) == 5
 
@@ -77,7 +77,7 @@ class TestExpandMask:
         old_mask = deepcopy(initial_mask)
         new_mask, _, _, _, _ = expand_mask(
             d["F"], d["S"], d["nocc"], deepcopy(old_mask),
-            hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
+            Cfull=d["Cfull"], variant="enocc",
         )
         assert np.all(new_mask[old_mask])
 
@@ -87,7 +87,7 @@ class TestExpandMask:
         old_count = np.sum(initial_mask)
         new_mask, _, _, _, _ = expand_mask(
             d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
-            hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
+            Cfull=d["Cfull"], variant="enocc",
         )
         assert np.sum(new_mask) > old_count
 
@@ -95,8 +95,7 @@ class TestExpandMask:
         """When called without a smask argument, the returned smask must be None."""
         d = scf_data
         _, _, _, _, smask_out = expand_mask(
-            d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
-            hcore=d["hcore"], Cfull=d["Cfull"],
+            d["F"], d["S"], d["nocc"], deepcopy(initial_mask), Cfull=d["Cfull"],
         )
         assert smask_out is None
 
@@ -105,7 +104,7 @@ class TestExpandMask:
         d = scf_data
         _, diff, _, _, _ = expand_mask(
             d["F"], d["S"], d["nocc"], deepcopy(initial_mask),
-            hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
+            Cfull=d["Cfull"], variant="enocc",
         )
         assert diff <= 0.0
 
@@ -118,7 +117,7 @@ class TestExpandMask:
         for _ in range(d["mol"].nao - np.sum(initial_mask)):
             mask, _, _, _, _ = expand_mask(
                 d["F"], d["S"], d["nocc"], mask,
-                hcore=d["hcore"], Cfull=d["Cfull"], variant="enocc",
+                Cfull=d["Cfull"], variant="enocc",
             )
             assert np.sum(mask) > prev_count
             prev_count = np.sum(mask)

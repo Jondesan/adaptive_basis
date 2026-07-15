@@ -164,8 +164,7 @@ class TestExpandMaskSymmetryAware:
         mask = smask_to_mask(smask, d["mol"].cart)
 
         mask, _, _, n_added, smask = expand_mask(
-            d["F"], d["S"], d["nocc"], mask, smask=smask,
-            hcore=d["hcore"], Cfull=d["Cfull"],
+            d["F"], d["S"], d["nocc"], mask, smask=smask, Cfull=d["Cfull"],
             mol=d["mol"], irrep_nelec=self.ALT_TARGET,
         )
 
@@ -186,9 +185,8 @@ class TestExpandMaskSymmetryAware:
         mask = smask_to_mask(smask, d["mol"].cart)
 
         mask, _, _, n_added, smask = expand_mask(
-            d["F"], d["S"], d["nocc"], mask, smask=smask,
-            hcore=d["hcore"], Cfull=d["Cfull"],
-        )
+            d["F"], d["S"], d["nocc"], mask, smask=smask, Cfull=d["Cfull"],
+            )
 
         assert n_added == 1
         assert smask[1][0] == True  # (0, 'O', '2s')
@@ -200,8 +198,7 @@ class TestExpandMaskSymmetryAware:
         mask[:2] = True
         with pytest.raises(RuntimeError):
             expand_mask(
-                d["F"], d["S"], d["nocc"], mask,
-                hcore=d["hcore"], Cfull=d["Cfull"],
+                d["F"], d["S"], d["nocc"], mask, Cfull=d["Cfull"],
                 mol=d["mol"], irrep_nelec=self.ALT_TARGET,
             )
 
