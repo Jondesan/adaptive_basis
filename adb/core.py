@@ -1,4 +1,4 @@
-"""Adaptive basis set method"""
+"""Adaptive basis set library core functionality"""
 
 import numpy as np
 from pyscf.scf.addons import project_dm_nr2nr
@@ -747,7 +747,6 @@ def expand_mask(
     mask:                   np.ndarray,
     smask:                  np.ndarray | None   = None,
     variant:                str                 = 'enocc',
-    hcore:                  np.ndarray | None   = None,
     Cfull:                  np.ndarray | None   = None,
     link_shells:            bool                = True,
     nfunc_normalisation:    bool                = True,
