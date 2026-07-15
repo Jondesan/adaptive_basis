@@ -7,13 +7,22 @@ import the submodule directly: import adb.adbutils, import
 adb.atomic_block_util.
 """
 
-from .core import (
+from .orbitalutil import (
     get_occupied_orbitals,
     get_occupied_orbitals_from_scf,
+)
+
+from .initialization import (
     atomic_block_minimal_basis,
     find_projected_minimal_basis_mask,
+)
+
+from .search import (
     find_subspace,
     expand_mask,
+)
+
+from .analysis import (
     mask_analysis,
 )
 
