@@ -3,6 +3,8 @@ from adb.molutil import create_shell_separated_mol
 from adb.maskutil import init_smask
 from copy import deepcopy
 import os
+import sys
+from warnings import warn
 from pyscf.gto import Mole
 
 def get_files_in_folder(folder: str):
@@ -291,3 +293,77 @@ def function_labels_from_mask(mask, mol):
         atom_dict[key].sort(key=orbital_key)
 
     return atom_dict
+
+
+def print_atomic_block_atom_header(atom, nfunc_per_minimal_atom, nfuncs):
+    print(f'{atom=}')
+    print(f'{nfunc_per_minimal_atom=}')
+    print(f'{nfuncs=}')
+
+
+def print_atomic_block_energies_debug(energies):
+    print(f'{energies=}')
+
+
+def print_restricted_atom_orbital_summary(nocca, noccb, e_atom):
+    print(f'{nocca=}, {noccb=}')
+    print(f'Energy of highest orbital {e_atom[nocca-1]*27.2114} eV')
+
+
+def print_unrestricted_atom_orbital_summary(nocca, noccb, e_atom):
+    print(f'Energy of highest alpha orbital {e_atom[0, nocca-1]*27.2114} eV')
+    print(f'Energy of highest beta  orbital {e_atom[1, noccb-1]*27.2114} eV')
+
+
+def print_atomic_block_state_energies(Qlim, e_atom, nocca, noccb, restricted):
+    print(f'{Qlim=}')
+    with numpy.printoptions(precision=2, suppress=True):
+        if restricted:
+            print(f'Bound state energies [eV]: {e_atom[e_atom<0]*27.2114}')
+            print(f'Occupied state energies [eV]: {e_atom[:nocca]*27.2114}')
+        else:
+            print(f'Bound alpha state energies [eV]: {e_atom[0, e_atom[0,:]<0]*27.2114}')
+            print(f'Bound beta  state energies [eV]: {e_atom[1, e_atom[1,:]<0]*27.2114}')
+            print(f'Occupied alpha state energies [eV]: {e_atom[0, :nocca]*27.2114}')
+            print(f'Occupied beta  state energies [eV]: {e_atom[1, :noccb]*27.2114}')
+
+
+def print_find_subspace_start(mol):
+    print('Running find_subspace for mol ', mol.atom)
+
+
+def warn_conflicting_initialization():
+    warn("Both 'abd_initialization' and 'initialize_by_projection' cannot be True simultaneously.\nInitialization by projection takes precedent.")
+
+
+def print_projection_initialization_message():
+    print("--- Initializing the dual basis by minimal basis projection ---")
+
+
+def print_mask_analysis_init_header(init_method):
+    print('\n' + 20*'#' + ' INITIALIZATION: ' + f'{init_method.upper():<30s} ' + 33*'#')
+
+
+def print_mask_history_label(label, index):
+    print(f'{label},  ', end='')
+    if index % 10 == 0:
+        print()
+
+
+def print_minimal_basis_summary(minimal_mask, mol):
+    print(numpy.sum(minimal_mask))
+    print(function_labels_from_mask(minimal_mask, mol))
+
+
+def print_initialization_footer(num_toggled):
+    print('\nNumber of toggled functions:', num_toggled)
+    print(20*'#' + ' INITIALIZATION END ' + 61*'#')
+
+
+def print_link_shells_notice():
+    print('\nLink shells: ON')
+    print('Additional functions may be added due to shell linking!')
+
+
+def print_subbasis_scf_not_converged_warning():
+    print('The SCF did not converge in the subbasis. Results may be unreliable.', file=sys.stderr)
