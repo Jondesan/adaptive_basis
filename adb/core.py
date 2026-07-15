@@ -27,63 +27,6 @@ from .ioutil import (
 from .CONSTANTS import NFUNCS, EXPAND_MASK_EPS, ELEMENTS
 
 
-def get_sub_scf_attributes(
-    mol:            gto.Mole,
-    fock:           np.ndarray,
-    overlap:        np.ndarray,
-    dft:            bool            = False,
-    xc:             str             = 'b3lyp',
-    grid_level:     int             = 7,
-    ) -> tuple[float, float, np.ndarray]:
-    """Calculates converged attributes for the system.
-
-    Args:
-        mol : pyscf.gto.Mole
-            The molecule object
-        dft : bool
-            Hartree-Fock or DFT.
-            Optional, default is False
-        xc : str
-            XC functional string accepted by PySCF.
-            Optional, default is 'b3lyp'.
-        grid_level : int
-            predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
-            Optional, default is 3.
-
-    Returns:
-        The SCF energy, sum of occupied orbital energies of the
-        subbasis, the MO coefficient matrix of the subbasis.
-    """
-    restricted = (len(fock.shape) == 2)
-    mf = mol.HF()
-    mf = mf.apply(scf.addons.remove_linear_dep_)
-    if dft:
-        mf = mf.to_ks(xc=xc)
-        mf.grids.level = grid_level
-        mf.grids.prune = None
-
-    # Diagonalize fock matrix and form guess density matrix
-    if fock.shape[1] > 1:
-        e, c = eig(fock, overlap)
-        occ = mf.get_occ(e, c)
-        dm = mf.make_rdm1(c, occ)
-        mf.init_guess = dm
-    mf.kernel(dump_chk=False)
-
-    scf_energy = mf.e_tot
-    # sum over occupied orbital energies
-    if restricted:
-        nocc_sb = np.sum(mf.mo_occ > 0)
-        scf_orbital_energy = sum(np.sort(mf.mo_energy)[:nocc_sb])
-    else:
-        nocc_sb = [np.sum(mf.mo_occ[0] > 0), np.sum(mf.mo_occ[1] > 0)]
-        scf_orbital_energy = .5 * sum(
-            np.sort(mf.mo_energy[0])[:nocc_sb[0]] +
-            np.sort(mf.mo_energy[1])[:nocc_sb[1]])
-        
-    return scf_energy, scf_orbital_energy, mf.mo_coeff
-
-
 def get_occupied_orbitals(
         epsilon_i:      np.ndarray,
         nocc:           tuple,
@@ -591,15 +534,11 @@ def find_subspace(
         if link_shells and not initialize_by_projection:
             # If link_shells true, set same shells of same atoms to True
             smask = set_linked_shells(smask, True)
-            # if verbose:
-            #     print('\nLinked shells: ON\n')
 
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
-    sub_hcore = Cfull = Csub = None
-    if variant == 'ecore':
-        sub_hcore = scf_obj_copy.hf.get_hcore(mol)[mask_init_idx, mask_init_idx]
-    elif variant == 'elden':
+    Cfull = None
+    if variant == 'elden':
         _, Cfull = eig(F, S)
 
     e_sub, Csub, orbsym = diagonalize_masked(
@@ -919,8 +858,6 @@ def mask_analysis(
     fock:                   np.ndarray,
     ovlp:                   np.ndarray,
     verbose:                bool                = True,
-    sym_occ_fname:          str                 = 'occupations.dat',
-    molfname:               str | None          = None,
     link_shells:            bool                = True,
     dft:                    bool                = False,
     xc:                     str                 = 'b3lyp',
@@ -1007,7 +944,6 @@ def mask_analysis(
     is_restricted = len(fock.shape) == 2
     nocc = fullbasis_mol.nelec
 
-    #init_method = mask_history[0][3]
     initialized = False
     dataframe = []
     orbital_history = [] if track_orbitals else None
@@ -1077,13 +1013,9 @@ def mask_analysis(
                 submf = subbasis_mol.UHF()#.newton()
             
             mask = smask_to_mask(smask, fullbasis_mol.cart)
-            maskedF = mask_matrix(fock, mask, is_restricted)
             maskedS = mask_matrix(ovlp, mask)
-            maskedHcore = mask_matrix(scf_obj_copy.get_hcore(), mask)
             if not np.allclose(maskedS, submf.get_ovlp()):
                 raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
-            if not np.allclose(maskedHcore, submf.get_hcore()):
-                raise RuntimeError('The masked core Hamiltonian and the full core Hamiltonian of masked molecule do not match!')
 
             if dft:
                 if is_restricted:
@@ -1095,7 +1027,8 @@ def mask_analysis(
                 submf.grids.prune = None
             submf = submf.apply(scf.addons.remove_linear_dep_)
 
-            # SCF initial guess by projecting the density from full basis to current basis
+            # SCF initial guess by projecting the density from
+            # full basis to current basis
             dm0_init = scf.addons.project_dm_nr2nr(scf_obj.mol,
                                                    scf_obj.make_rdm1(scf_obj.mo_coeff,
                                                                      scf_obj.mo_occ),
@@ -1189,7 +1122,7 @@ def mask_analysis(
                 print_subbasis_scf_not_converged_warning()
         else:
             mask = mask_i
-            e, subbasis_coeffs = eig(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
+            _, subbasis_coeffs = eig(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
             Q_sqrd = get_q_sqrd(
                 C_full, subbasis_coeffs,
                 ovlp[:,mask], nocc
