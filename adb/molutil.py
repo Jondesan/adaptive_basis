@@ -1,6 +1,8 @@
 from pyscf.gto import Mole
 from .basisutil import get_uncontracted_basis, extract_basis
 import numpy
+from pyscf.gto.mole import format_atom
+from pyscf.gto.basis import load_ecp
 
 def create_shell_separated_mol(
         mol:        Mole,
@@ -57,6 +59,51 @@ def basis_functions_per_atom(mol: Mole) -> numpy.ndarray:
                            else numpy.sum((angl + 1)*(angl + 2) // 2 * numc)
     
     return func_per_atom
+
+
+def create_mol_from_file(fn: str, basis_set: str, charge=0, 
+                         spin=0, unit="Angstrom", symmetry=False,
+                         **kwargs) -> Mole:
+    asymbs = list(set([atom[0] for atom in format_atom(fn)]))
+
+    # If ECPs are present, set the ECP basis dictionary, else None
+    ecp_bs = {}
+    for asymb in asymbs:
+        ecp = load_ecp(basis_set, asymb)
+        if not ecp:
+            continue
+        ecp_bs[asymb] = ecp
+    # If only None in ecp dict, set object to None so
+    # pyscf interprets it correctly
+    ecp_bs = None if not ecp_bs else ecp_bs
+
+    mol = Mole(
+        atom=fn,
+        basis=basis_set,
+        ecp=ecp_bs,
+        charge=charge,
+        spin=spin,
+        unit=unit,
+        symmetry=symmetry,
+        verbose=0,
+        **kwargs
+    )
+    mol = mol.build()
+
+    return mol
+
+
+def create_mol_from_template(template: Mole, **kwargs) -> Mole:
+    from copy import deepcopy
+
+    mol = deepcopy(template)
+    for key,val in kwargs.items():
+        if not hasattr(mol, key):
+            raise RuntimeError(f"Molecule object does not have attribute {key}")
+        setattr(mol, key, val)
+    mol = mol.build()
+
+    return mol
 
 
 def create_subbasis_mol(
