@@ -1,5 +1,5 @@
 import numpy
-from adb.molutil import create_shell_separated_mol
+from adb.molutil import create_shell_separated_mol, create_mol_from_file
 from adb.maskutil import init_smask
 from copy import deepcopy
 import os
@@ -75,30 +75,9 @@ def get_molecules_in_dir(
                 else:
                     charge = 0
                     spin = None
-                asymbs = list(set([atom[0] for atom in format_atom(fn)]))
-
-                # If ECPs are present, set the ECP basis dictionary, else None
-                ecp_bs = {}
-                for asymb in asymbs:
-                    ecp = load_ecp(unc + bs, asymb)
-                    if not ecp:
-                        continue
-                    ecp_bs[asymb] = ecp
-                # If only None in ecp dict, set object to None so
-                # pyscf interprets it correctly
-                ecp_bs = None if not ecp_bs else ecp_bs
-                _console.print(f"{ecp_bs=}", style="dim", markup=False)
-
-                mol = Mole(
-                    atom=fn,
-                    basis=unc + bs,
-                    ecp=ecp_bs,
-                    charge=charge,
-                    spin=spin,
-                    unit=unit,
-                    symmetry=symm,
-                    verbose=0,
-                ).build()
+                mol = create_mol_from_file(fn, unc + bs,
+                                           charge=charge, spin=spin, unit=unit,
+                                           symmetry=symm)
 
                 mol = create_shell_separated_mol(mol, verbose=mol.verbose)
                 smask = init_smask(mol)
