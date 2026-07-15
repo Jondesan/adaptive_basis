@@ -339,7 +339,7 @@ def dual_basis_energy_correction(
     dP = P_new - P_full_projected
     # If unrestricted calculation
     if len(dP.shape) > 2:
-        dE = (numpy.trace(dP[0] @ F_full[0]) + numpy.trace(dP[1] @ F_full[1])) / 2
+        dE = (numpy.trace(dP[0] @ F_full[0]) + numpy.trace(dP[1] @ F_full[1]))
     else:
         dE = numpy.trace(dP @ F_full)
     return numpy.real(dE), scf_obj.e_tot
