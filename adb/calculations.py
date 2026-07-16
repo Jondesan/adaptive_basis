@@ -40,7 +40,7 @@ def canonical_orth(
     """
     x = canonical_orth_(s, 1e-8)
     xhx = x.conj().T @ h @ x
-    e, c = linalg.eig(xhx)
+    e, c = linalg.eigh(xhx)
     c = x @ c
     idx = numpy.argsort(e)
     return e[idx], c[:,idx]

@@ -207,15 +207,12 @@ def _scf_orbital_energy(submf, is_restricted):
     """Sum of the converged SCF's occupied-orbital energies (spin-averaged
     for unrestricted)."""
     if is_restricted:
-        # nocc_sb = np.sum(submf.mo_occ > 0)
-        nocc_sb = len(submf.mo_occ > 0)
-        return sum(submf.mo_energy[:nocc_sb])
+        nocc_sb = np.sum(submf.mo_occ > 0)
+        return 2 * sum(submf.mo_energy[:nocc_sb])
     else:
-        # nocc_sb = [np.sum(submf.mo_occ[0] > 0), np.sum(submf.mo_occ[1] > 0)]
-        nocc_sb = [len(submf.mo_occ[0] > 0), len(submf.mo_occ[1] > 0)]
-        return .5 * sum(
-            submf.mo_energy[0][:nocc_sb[0]] +
-            submf.mo_energy[1][:nocc_sb[1]])
+        nocc_sb = [np.sum(submf.mo_occ[0] > 0), np.sum(submf.mo_occ[1] > 0)]
+        return  (sum(submf.mo_energy[0][:nocc_sb[0]]) +
+                 sum(submf.mo_energy[1][:nocc_sb[1]]))
 
 
 def _dual_basis_correction(submf, subbasis_mol, fullbasis_mol):
@@ -402,7 +399,7 @@ def mask_analysis(
                 dE, E_HF_largebasis = _dual_basis_correction(submf, subbasis_mol, fullbasis_mol)
         else:
             mask = mask_i
-            _, subbasis_coeffs = eig(mask_matrix(fock, mask, is_restricted=is_restricted), mask_matrix(ovlp, mask))
+            _, subbasis_coeffs = eig(mask_matrix(fock, mask), mask_matrix(ovlp, mask))
             Q_sqrd = get_q_sqrd(
                 C_full, subbasis_coeffs,
                 ovlp[:,mask], nocc

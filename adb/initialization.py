@@ -115,11 +115,7 @@ def atomic_block_minimal_basis(
         while np.abs(Q - Qlim) > eps:
             # Find largest element of density matrix
             P_atom_idx = np.unravel_index(np.argmax(P_atom, axis=None),P_atom.shape)
-            # Check whether only 1 index tuple was found (no two equal
-            # elements in P_atom), otherwise set P_atom_idx to the first
-            # found index tuple
-            if not isinstance(P_atom_idx[0], np.int64):
-                P_atom_idx = P_atom_idx[0]
+            
             Pat_i, Pat_j = P_atom_idx
 
             # Set functions of same shell to True
@@ -153,11 +149,11 @@ def atomic_block_minimal_basis(
                     (nocca, noccb),
                     )
             else:
+                raise NotImplementedError('The function-by-function branch has not been implemented yet.')
                 atom_indices.extend(list(set((Pat_i, Pat_j))))
                 P_atom[Pat_i, Pat_j] = 0
                 P_atom[np.flip((Pat_i, Pat_j))] = 0
                 # fixme: update c_mask and Q
-                raise RuntimeError('not implemented')
 
         # Mask
         atom_indices = list(atom_indices)

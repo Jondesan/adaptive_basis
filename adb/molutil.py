@@ -134,4 +134,5 @@ def get_array_of_angular_momenta_and_atom_id(mol):
 
 
 def funcs_on_shell(angl, cart=False):
-    return (angl + 1) * (angl + 2) / 2 if cart else 2 * angl + 1
+    # Floor division to output an integer
+    return (angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1
