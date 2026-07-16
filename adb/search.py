@@ -441,7 +441,6 @@ def expand_mask(
         genuine improvement -- see EXPAND_MASK_EPS -- in which case mask/
         smask are returned unchanged), shell mask if smask is provided.
     """
-    restricted = (len(F.shape) == 2)
     symmetry_aware = mol is not None and irrep_nelec is not None
     if symmetry_aware and smask is None:
         raise RuntimeError(
