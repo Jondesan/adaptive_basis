@@ -125,8 +125,8 @@ def create_subbasis_mol(
 def get_array_of_angular_momenta_and_atom_id(mol):
     angls_aid = numpy.zeros((mol.nao_nr(), 2), dtype=int)
     input_idx = 0
-    for i, bas in enumerate(mol._bas):
-        nfuncs = funcs_on_shell(bas[1], mol.cart)
+    for bas in mol._bas:
+        nfuncs = funcs_on_shell(bas[1], mol.cart) * bas[3]
         angls_aid[input_idx:input_idx + nfuncs, 0] = bas[1]
         angls_aid[input_idx:input_idx + nfuncs, 1] = bas[0]
         input_idx += nfuncs
