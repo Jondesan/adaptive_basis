@@ -1,6 +1,11 @@
+import numpy as np
 import pytest
+import pyscf
 from pyscf import gto
-from adb import create_shell_separated_mol, create_subbasis_mol, init_smask, extract_basis
+from adb import (
+    create_shell_separated_mol, create_subbasis_mol, init_smask, extract_basis,
+    find_projected_minimal_basis_mask, get_array_of_angular_momenta_and_atom_id,
+)
 
 
 # ╭─────────────────────────────────────────────────────────────────────────╮
@@ -146,4 +151,87 @@ class TestCreateSubbasisMol:
         sub_mol = create_subbasis_mol(mol, smask)
         assert sub_mol.charge == mol.charge
         assert sub_mol.spin == mol.spin
+
+
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ initialization.find_projected_minimal_basis_mask                        │
+# ╰─────────────────────────────────────────────────────────────────────────╯
+
+class TestFindProjectedMinimalBasisMask:
+
+    def test_returns_boolean_mask_of_correct_length(self, h2o_def2tzvp):
+        mask = find_projected_minimal_basis_mask(h2o_def2tzvp)
+        assert isinstance(mask, np.ndarray)
+        assert mask.dtype == bool
+        assert len(mask) == h2o_def2tzvp.nao_nr()
+
+    def test_selected_count_matches_sto3g_size(self, h2o_def2tzvp):
+        """The number of selected functions must equal the nao of STO-3G
+        built on the same geometry, since that is the minimal basis being
+        projected onto."""
+        mask = find_projected_minimal_basis_mask(h2o_def2tzvp)
+        mol_sto3g = pyscf.M(atom=h2o_def2tzvp.atom, basis='sto3g', verbose=0)
+        assert np.sum(mask) == mol_sto3g.nao_nr()
+
+    def test_identity_when_mol_is_already_sto3g(self, h2o_sto3g):
+        """Projecting STO-3G onto itself should select every function."""
+        mask = find_projected_minimal_basis_mask(h2o_sto3g)
+        assert np.all(mask)
+
+    def test_identity_for_h2_sto3g(self, h2_sto3g):
+        mask = find_projected_minimal_basis_mask(h2_sto3g)
+        assert np.all(mask)
+
+    def test_selection_is_shell_complete(self, h2o_def2tzvp):
+        """link_shells guarantees that within any given shell (fixed atom,
+        angular momentum and contraction) the selection is all-or-nothing."""
+        mol = h2o_def2tzvp
+        mask = find_projected_minimal_basis_mask(mol)
+        ao_loc = mol.ao_loc_nr()
+        for start, end in zip(ao_loc[:-1], ao_loc[1:]):
+            shell_mask = mask[start:end]
+            assert shell_mask.all() or not shell_mask.any()
+
+    def test_shell_composition_matches_sto3g(self, h2o_def2tzvp):
+        """For water, the projected minimal basis should reproduce STO-3G's
+        shell composition: 2 s-type + 3 p-type functions on O, 1 s-type on
+        each H."""
+        mol = h2o_def2tzvp
+        mask = find_projected_minimal_basis_mask(mol)
+        angls_aid = get_array_of_angular_momenta_and_atom_id(mol)
+        selected = angls_aid[mask]
+
+        oxygen = selected[selected[:, 1] == 0]
+        assert np.sum(oxygen[:, 0] == 0) == 2
+        assert np.sum(oxygen[:, 0] == 1) == 3
+
+        for atom_id in (1, 2):
+            hydrogen = selected[selected[:, 1] == atom_id]
+            assert len(hydrogen) == 1
+            assert hydrogen[0, 0] == 0
+
+    def test_selected_count_matches_sto3g_size_general_contraction(self, h2o_augpc1):
+        """Same invariant as test_selected_count_matches_sto3g_size, but for a
+        generally-contracted basis (aug-pc-1), where several shells of the
+        same atom/angular-momentum share the same set of primitives."""
+        mask = find_projected_minimal_basis_mask(h2o_augpc1)
+        mol_sto3g = pyscf.M(atom=h2o_augpc1.atom, basis='sto3g', verbose=0)
+        assert np.sum(mask) == mol_sto3g.nao_nr()
+
+    def test_shell_composition_matches_sto3g_general_contraction(self, h2o_augpc1):
+        """Same invariant as test_shell_composition_matches_sto3g, but for a
+        generally-contracted basis (aug-pc-1)."""
+        mol = h2o_augpc1
+        mask = find_projected_minimal_basis_mask(mol)
+        angls_aid = get_array_of_angular_momenta_and_atom_id(mol)
+        selected = angls_aid[mask]
+
+        oxygen = selected[selected[:, 1] == 0]
+        assert np.sum(oxygen[:, 0] == 0) == 2
+        assert np.sum(oxygen[:, 0] == 1) == 3
+
+        for atom_id in (1, 2):
+            hydrogen = selected[selected[:, 1] == atom_id]
+            assert len(hydrogen) == 1
+            assert hydrogen[0, 0] == 0
 

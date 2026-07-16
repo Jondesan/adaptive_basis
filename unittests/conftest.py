@@ -25,6 +25,14 @@ def h2o_def2tzvp():
     )
 
 @pytest.fixture(scope="session")
+def h2o_augpc1():
+    return pyscf.M(
+        atom="O 0 0 0; H 0 0.757 0.587; H 0 -0.757 0.587",
+        basis="aug-pc-1",
+        verbose=0,
+    )
+
+@pytest.fixture(scope="session")
 def h2o_sto3g():
     return pyscf.M(
         atom="O 0 0 0; H 0 0.757 0.587; H 0 -0.757 0.587",
@@ -49,6 +57,13 @@ def h2o_sto3g_c2v():
 @pytest.fixture(scope="session")
 def h2o_mf(h2o_def2tzvp):
     mf = h2o_def2tzvp.HF()
+    mf.verbose = 0
+    mf.kernel()
+    return mf
+
+@pytest.fixture(scope="session")
+def h2o_apc1_mf(h2o_augpc1):
+    mf = h2o_augpc1.HF()
     mf.verbose = 0
     mf.kernel()
     return mf
