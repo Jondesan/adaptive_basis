@@ -259,7 +259,7 @@ def find_subspace(
         _, Cfull = eig(F, S)
 
     e_sub, Csub, orbsym = diagonalize_masked(
-        mask_matrix(F, mask, is_restricted=is_restricted), mask_matrix(S, mask),
+        mask_matrix(F, mask), mask_matrix(S, mask),
         fullbasis_mol if symmetry_aware else None, smask)
 
     previous_sum = get_iteration_criteria_value(
@@ -298,7 +298,7 @@ def find_subspace(
                 0.0,
                 'Max element of Fock matrix'))
 
-    while True and not np.all(mask):
+    while not np.all(mask):
         mask, difference, current_criteria_val, n_added, smask = expand_mask(
             F, S, nocc, mask,
             Cfull=scf_obj_copy.mo_coeff,
@@ -322,12 +322,14 @@ def find_subspace(
             # conv_tol-satisfying step) -- track_orbitals is meant to give
             # a complete per-cycle record.
             e_step, _, orbsym_step = diagonalize_masked(
-                mask_matrix(F, mask, is_restricted=is_restricted),
+                mask_matrix(F, mask),
                 mask_matrix(S, mask),
                 fullbasis_mol if symmetry_aware else None, smask)
             orbital_history.append(_orbital_history_entry(
                 mask, e_step, orbsym_step, nocc, irrep_nelec, symmetry_aware, is_restricted))
 
+        # If the dual basis does not span the minimal basis, skip collecting 
+        # the mask, resulting orbitals would not be even qualitatively correct
         if not basis_initialized:
             basis_initialized = np.sum(mask) >= np.max(nocc)
             continue
@@ -337,17 +339,10 @@ def find_subspace(
             break
 
         if return_mask_history:
-            if basis_initialized:
-                mask_history.append(
-                    (copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-                    current_criteria_val,
-                    difference))
-            else:
-                mask_history.append( (
-                    copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-                    0.0,
-                    0.0,
-                    'Max element of Fock matrix') )
+            mask_history.append(
+                (copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+                current_criteria_val,
+                difference))
 
         previous_sum = current_criteria_val
 
@@ -461,7 +456,7 @@ def expand_mask(
             maskedF, maskedS, mol if symmetry_aware else None, test_smask)
         return (evals, coeffs), orbsym
 
-    maskedF = mask_matrix(F, mask, restricted)
+    maskedF = mask_matrix(F, mask)
     maskedS = mask_matrix(S, mask)
     (evals, coeffs), orbsym = _eig(maskedF, maskedS, smask)
     last_sum = 0.0
@@ -480,14 +475,14 @@ def expand_mask(
 
             test_mask = copy.deepcopy(mask)
             test_mask[i] = True
-            maskedF = mask_matrix(F, test_mask, restricted)
+            maskedF = mask_matrix(F, test_mask)
             maskedS = mask_matrix(S, test_mask)
             evals, coeffs = eig(maskedF, maskedS)
 
             test_sums.append(
-                (i,
+                (i, 
                 get_iteration_criteria_value(
-                    'enocc', epsilon_i=evals, nocc=nocc,
+                    variant, epsilon_i=evals, nocc=nocc,
                     Csub=coeffs, Cfull=Cfull,
                     ovlp=S[:, test_mask]),
                 1))
@@ -510,7 +505,7 @@ def expand_mask(
             test_smask[sidx] = submask
             test_mask = smask_to_mask(test_smask)
 
-            maskedF = mask_matrix(F, test_mask, restricted)
+            maskedF = mask_matrix(F, test_mask)
             maskedS = mask_matrix(S, test_mask)
             (evals, coeffs), test_orbsym = _eig(maskedF, maskedS, test_smask)
 

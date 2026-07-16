@@ -193,16 +193,13 @@ def set_linked_shells(
     selected_shells = numpy.argwhere([sm[0] for sm in copysmask])
     all_shells = numpy.array([''.join(map(str, sm[3][1:])) for sm in copysmask])
     same_as_selected = numpy.argwhere(all_shells == all_shells[selected_shells])[:,1]
-    temp = copysmask[same_as_selected][:,0]
-    temp = val
-    copysmask[same_as_selected,0] = temp
+    copysmask[same_as_selected,0] = val
     return copysmask
 
 
 def mask_matrix(
         mat:                numpy.ndarray,
-        mask:               numpy.ndarray,
-        is_restricted:      bool        = True ) -> numpy.ndarray:
+        mask:               numpy.ndarray) -> numpy.ndarray:
     """Return masked matrix
 
     Args:
@@ -210,12 +207,10 @@ def mask_matrix(
             Matrix, e.g. Fock matrix. If using restricted Hartree-Fock,
             should be 2D. If using unrestricted, 3D with alpha and beta
             matrices as the array elements along axis 0 if such matrix.
-            (overlap matrix will only have one matrix in UHF)
+            (overlap matrix will only have one matrix in UHF).
+            The dimension is determined automatically.
         mask : array
             The basis mask.
-        is_restricted : bool
-            Whether using restricted or unrestricted HF. Optional,
-            default is True.
 
     Returns:
         masked_mat : ndarray
