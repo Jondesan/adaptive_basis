@@ -140,7 +140,7 @@ def start_smask(h2o_c2v_scf_data):
     smask = init_smask(mol, mol.cart)
     smask[0][0] = True  # O-1s
     smask[3][0] = True  # H-1s (atom 1)
-    smask = set_linked_shells(smask, True)  # also flips the other H-1s
+    smask = set_linked_shells(smask)  # also flips the other H-1s
     return smask
 
 
