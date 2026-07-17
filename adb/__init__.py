@@ -1,10 +1,7 @@
 """adb: adaptive basis set method.
 
 Core algorithmic API is available directly off this package, e.g.
-adb.find_subspace(...). Auxiliary functionality (psi4/basis-exchange
-I/O helpers, the legacy atomic-block workflow) is not hoisted here --
-import the submodule directly: import adb.adbutils, import
-adb.atomic_block_util.
+adb.find_subspace(...).
 """
 
 from .orbitalutil import (
