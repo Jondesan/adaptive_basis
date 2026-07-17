@@ -184,17 +184,15 @@ def maskidx_to_smaskidx(
     return mapping
 
 
-def set_linked_shells(
-        smask:  numpy.ndarray,
-        val:    bool        ) -> numpy.ndarray:
+def set_linked_shells(smask:  numpy.ndarray) -> numpy.ndarray:
     """Set smask to 'val' at linked shell positions.
     """
-    copysmask = deepcopy(smask)
-    selected_shells = numpy.argwhere([sm[0] for sm in copysmask])
-    all_shells = numpy.array([''.join(map(str, sm[3][1:])) for sm in copysmask])
+    csmask = deepcopy(smask)
+    selected_shells = numpy.argwhere([sm[0] for sm in csmask])
+    all_shells = numpy.array([''.join(map(str, sm[3][1:])) for sm in csmask])
     same_as_selected = numpy.argwhere(all_shells == all_shells[selected_shells])[:,1]
-    copysmask[same_as_selected,0] = val
-    return copysmask
+    csmask[same_as_selected,0] = True
+    return csmask
 
 
 def mask_matrix(

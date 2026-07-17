@@ -244,9 +244,8 @@ def find_subspace(
     if get_smask:
         smask = init_smask(fullbasis_mol, fullbasis_mol.cart)
         smask = mask_to_smask(mask, smask, fullbasis_mol.cart)
-        if link_shells and not initialize_by_projection:
-            # If link_shells true, set same shells of same atoms to True
-            smask = set_linked_shells(smask, True)
+        # If link_shells true, set same shells of same atoms to True
+        smask = set_linked_shells(smask)
 
         mask = smask_to_mask(smask, fullbasis_mol.cart)
 
