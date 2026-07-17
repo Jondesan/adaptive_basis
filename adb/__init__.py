@@ -82,6 +82,3 @@ from .CONSTANTS import (
     VARIANTS, NFUNCS, ANGULAR, ELEMENTS,
     SYMMETRY_SHORTFALL_PENALTY, EXPAND_MASK_EPS,
 )
-
-# adbutils / atomic_block_util are intentionally NOT imported here --
-# reach them via `import adb.adbutils` / `import adb.atomic_block_util`.
