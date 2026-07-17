@@ -259,7 +259,7 @@ def mask_analysis(
     verbose:                bool                = True,
     link_shells:            bool                = True,
     dft:                    bool                = False,
-    xc:                     str                 = 'b3lyp',
+    xc:                     str                 = 'bpe,pbe',
     grid_level:             int                 = 7,
     C_full:                 np.ndarray | None   = None,
     calculate_correction:   bool                = False,
