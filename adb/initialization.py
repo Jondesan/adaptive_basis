@@ -24,7 +24,6 @@ def atomic_block_minimal_basis(
     S:                          np.ndarray,
     Q_tol:                      float           = 1.0,
     by_shell:                   bool            = True,
-    get_mask_history:           bool            = False,
     verbose:                    bool            = False,
     spherically_average_fock:   bool            = True,
     ) -> tuple[np.ndarray, np.ndarray] | np.ndarray:
@@ -36,9 +35,6 @@ def atomic_block_minimal_basis(
     minimal_basis_mask = np.zeros(mol.nao, dtype=bool)
     # if by_shell:
     smask = init_smask(mol, mol.cart)
-    if get_mask_history:
-        mask_history = []
-        full_mask = np.zeros(mol.nao, dtype=bool)
 
     atoms = list(map(lambda x: x[0], mol._atom))
 
@@ -129,13 +125,13 @@ def atomic_block_minimal_basis(
                     mask_matrix(S_atom.copy(), mask_atom)
                     )
 
-                if get_mask_history:
-                    # set Pat_i and Pat_j in the full mask to True in
-                    # the current atom block
-                    full_mask[func_offset + Pat_i] = True
-                    full_mask[func_offset + Pat_j] = True
-                    full_smask = mask_to_smask(full_mask, smask.copy(), mol.cart)
-                    mask_history.append(copy.deepcopy(full_smask))
+                # if get_mask_history:
+                #     # set Pat_i and Pat_j in the full mask to True in
+                #     # the current atom block
+                #     full_mask[func_offset + Pat_i] = True
+                #     full_mask[func_offset + Pat_j] = True
+                #     full_smask = mask_to_smask(full_mask, smask.copy(), mol.cart)
+                #     mask_history.append(copy.deepcopy(full_smask))
 
                 # set elements i,j and j,i of P_atom to zero
                 P_atom[mask_atom, :] = 0
@@ -160,8 +156,6 @@ def atomic_block_minimal_basis(
         minimal_basis_mask[func_offset + np.asarray(atom_indices)] = True
 
     assert np.sum(minimal_basis_mask) >= nfuncs_min_tot
-    if get_mask_history:
-        return minimal_basis_mask, mask_history
     return minimal_basis_mask
 
 

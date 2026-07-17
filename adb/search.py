@@ -56,10 +56,7 @@ def _initialize_mask(
     atomic block decomposition, STO-3G overlap projection, or (fallback)
     the single AO with the smallest diagonal Fock element.
 
-    Returns (mask, mask_init_idx, minimal_basis_history) --
-    minimal_basis_history is only non-None when abd_initialization is
-    used (find_subspace's return_mask_history replays it as the
-    initialization portion of the mask history).
+    Returns (mask, mask_init_idx).
     """
     if abd_initialization and initialize_by_projection:
         warn_conflicting_initialization()
@@ -70,9 +67,8 @@ def _initialize_mask(
     else:
         Fii = .5 * np.sum(np.diagonal(F, axis1=1, axis2=2), axis=0)
 
-    minimal_basis_history = None
     if abd_initialization:
-        mask, minimal_basis_history = atomic_block_minimal_basis(
+        mask = atomic_block_minimal_basis(
             mol,
             F,
             S,
@@ -90,7 +86,7 @@ def _initialize_mask(
         mask = [False] * fullbasis_mol.nao_nr()
         mask[mask_init_idx[0]] = True
 
-    return mask, mask_init_idx, minimal_basis_history
+    return mask, mask_init_idx
 
 
 def _orbital_history_entry(mask, e, orbsym, nocc, irrep_nelec, symmetry_aware, is_restricted):
@@ -238,7 +234,7 @@ def find_subspace(
 
     # mask or smask initialization
     is_restricted = len(F.shape) == 2
-    mask, mask_init_idx, minimal_basis_history = _initialize_mask(
+    mask, _ = _initialize_mask(
         mol, F, S, fullbasis_mol, verbose,
         abd_initialization, initialize_by_projection,
         spherical_average, abd_Q_tol)
@@ -276,27 +272,18 @@ def find_subspace(
     if return_mask_history:
         mask_history = []
         if abd_initialization:
-            for mb_mask in minimal_basis_history:
-                mask_history.append(
-                    (mb_mask,
-                    0.0,
-                    0.0,
-                    'Atomic Block Decomposition')
-                )
-            basis_initialized = True
+            dual_basis_initialization = 'Atomic Block Decomposition'
         elif initialize_by_projection:
-            mask_history.append((
-                copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-                previous_sum,
-                0.0,
-                'Minimal basis projection'))
-            basis_initialized = True
+            dual_basis_initialization = 'Minimal basis projection'
         else:
-            mask_history.append((
-                copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-                previous_sum,
-                0.0,
-                'Max element of Fock matrix'))
+            dual_basis_initialization = 'Max element of Fock matrix'
+        mask_history.append((
+            copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
+            previous_sum,
+            0.0,
+            dual_basis_initialization))
+        basis_initialized = True
+        
 
     while not np.all(mask):
         mask, difference, current_criteria_val, n_added, smask = expand_mask(
