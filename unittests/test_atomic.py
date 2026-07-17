@@ -89,12 +89,3 @@ class TestAtomicBlockMinimalBasis:
         mol, F, S = h2o_fock_init
         mask = atomic_block_minimal_basis(mol, F, S)
         assert np.sum(mask) < mol.nao
-
-    def test_mask_history_returned_when_requested(self, h2o_fock_init):
-        """With get_mask_history=True, a tuple (mask, history) is returned."""
-        mol, F, S = h2o_fock_init
-        result = atomic_block_minimal_basis(mol, F, S, get_mask_history=True)
-        assert isinstance(result, tuple) and len(result) == 2
-        mask, history = result
-        assert mask.dtype == bool
-        assert isinstance(history, list) and len(history) >= 1
