@@ -31,7 +31,7 @@ def get_files_in_folder(folder: str):
 
 def get_molecules_in_dir(
     molpath: str,
-    basis_sets: list,
+    basis_sets: str | list,
     get_decontractions: bool = False,
     unit = 'Angstrom',
     symmetry: bool | str = False,
@@ -61,7 +61,9 @@ def get_molecules_in_dir(
             symm = point_group_from_file(symmetry_fname, molfname)
         else:
             symm = symmetry
-
+        
+        if isinstance(basis_sets, str):
+            basis_sets = basis_sets.split()
         for bs in basis_sets:
             for unc in (
                 ["", "unc-"] if get_decontractions and "unc-" not in bs else [""]
