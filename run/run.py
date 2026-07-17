@@ -554,7 +554,7 @@ if __name__ == "__main__":
         help="Turn duplicate shell linking on/off during shell by shell calculations.",
     )
     parser.add_argument(
-        "-u", "--unit", type=str, required=False, default='Angstrom',
+        "-u", "--unit", type=str, required=True,
         choices=['Angstrom', 'Bohr'],
         help="coordinate units of xyz file"
     )
