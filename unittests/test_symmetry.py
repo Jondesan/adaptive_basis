@@ -3,13 +3,20 @@ import copy
 import numpy as np
 import pytest
 
-import adb
+from adb import \
+    find_subspace, expand_mask, get_occupied_orbitals, \
+    get_occupied_orbitals_from_scf, mask_analysis, \
+    eig, diagonalize_masked, symmetrized_eig, \
+    get_iteration_criteria_value, \
+    create_shell_separated_mol, \
+    init_smask, set_linked_shells, smask_to_mask, \
+    write_orbital_history, CONSTANTS
 import pyscf
 
 
-# ---------------------------------------------------------------------------
-# adb.symmetrized_eig
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ calculations.symmetrized_eig                                            │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestSymmetrizedEig:
 
@@ -24,7 +31,7 @@ class TestSymmetrizedEig:
         F = mf.get_fock()
         S = mf.get_ovlp()
 
-        e, c, orbsym = adb.symmetrized_eig(
+        e, c, orbsym = symmetrized_eig(
             F, S, h2o_sto3g_c2v.symm_orb, h2o_sto3g_c2v.irrep_id)
 
         np.testing.assert_allclose(
@@ -33,9 +40,9 @@ class TestSymmetrizedEig:
         assert c.shape == (h2o_sto3g_c2v.nao_nr(), e.size)
 
 
-# ---------------------------------------------------------------------------
-# adb.get_iteration_criteria_value (irrep-aware 'enocc' branch)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ calculations.get_iteration_criteria_value (irrep-aware 'enocc' branch)  │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestEnoccByIrrep:
 
@@ -48,7 +55,7 @@ class TestEnoccByIrrep:
         orbsym = np.array(['A1', 'A1', 'B1', 'A1', 'B1'])
         irrep_nelec = {'A1': 4, 'B1': 2}  # 2 A1 orbitals + 1 B1 orbital
 
-        val = adb.get_iteration_criteria_value(
+        val = get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(3, 3),
             irrep_nelec=irrep_nelec, orbsym=orbsym)
 
@@ -64,11 +71,11 @@ class TestEnoccByIrrep:
         orbsym = np.array(['A1', 'A1', 'B2'])
         irrep_nelec = {'A1': 4, 'B1': 2}  # B1 has zero available orbitals
 
-        val = adb.get_iteration_criteria_value(
+        val = get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(3, 3),
             irrep_nelec=irrep_nelec, orbsym=orbsym)
 
-        expected = 2 * (-2.0 + -1.0) + 2 * adb.SYMMETRY_SHORTFALL_PENALTY
+        expected = 2 * (-2.0 + -1.0) + 2 * CONSTANTS.SYMMETRY_SHORTFALL_PENALTY
         assert val == pytest.approx(expected)
 
     def test_unrestricted_uses_per_spin_targets(self):
@@ -79,7 +86,7 @@ class TestEnoccByIrrep:
         orbsym = np.array(['A1', 'A1', 'B1'])
         irrep_nelec = {'A1': (2, 1)}  # 2 alpha, 1 beta in A1; nothing in B1
 
-        val = adb.get_iteration_criteria_value(
+        val = get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(2, 1),
             irrep_nelec=irrep_nelec, orbsym=orbsym)
 
@@ -88,7 +95,7 @@ class TestEnoccByIrrep:
 
     def test_orbsym_required_with_irrep_nelec(self):
         with pytest.raises(ValueError):
-            adb.get_iteration_criteria_value(
+            get_iteration_criteria_value(
                 'enocc', epsilon_i=np.array([-1.0]), nocc=(1, 1),
                 irrep_nelec={'A1': 2})
 
@@ -97,21 +104,21 @@ class TestEnoccByIrrep:
         the pre-existing, symmetry-blind lowest-N-by-energy criterion (2x
         for restricted -- each spatial orbital holds 2 electrons)."""
         epsilon_i = np.array([-2.0, -1.0, -0.5, 0.1, 0.2])
-        val = adb.get_iteration_criteria_value(
+        val = get_iteration_criteria_value(
             'enocc', epsilon_i=epsilon_i, nocc=(2, 2))
         assert val == pytest.approx(2 * (-2.0 + -1.0))
 
 
-# ---------------------------------------------------------------------------
-# adb.expand_mask (symmetry-aware mode)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ maskutil.expand_mask (symmetry-aware mode)                              │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 @pytest.fixture(scope="module")
 def h2o_c2v_scf_data(h2o_sto3g_c2v):
     mf = h2o_sto3g_c2v.RHF()
     mf.verbose = 0
     mf.kernel()
-    shellsep_mol = adb.create_shell_separated_mol(h2o_sto3g_c2v)
+    shellsep_mol = create_shell_separated_mol(h2o_sto3g_c2v)
     return {
         "mol": shellsep_mol,
         "F": mf.get_fock(),
@@ -130,10 +137,10 @@ def start_smask(h2o_c2v_scf_data):
     the very next expand_mask call has a real choice to make between them.
     """
     mol = h2o_c2v_scf_data["mol"]
-    smask = adb.init_smask(mol, mol.cart)
+    smask = init_smask(mol, mol.cart)
     smask[0][0] = True  # O-1s
     smask[3][0] = True  # H-1s (atom 1)
-    smask = adb.set_linked_shells(smask, True)  # also flips the other H-1s
+    smask = set_linked_shells(smask)  # also flips the other H-1s
     return smask
 
 
@@ -154,11 +161,10 @@ class TestExpandMaskSymmetryAware:
             self, h2o_c2v_scf_data, start_smask):
         d = h2o_c2v_scf_data
         smask = copy.deepcopy(start_smask)
-        mask = adb.smask_to_mask(smask, d["mol"].cart)
+        mask = smask_to_mask(smask, d["mol"].cart)
 
-        mask, _, _, n_added, smask = adb.expand_mask(
-            d["F"], d["S"], d["nocc"], mask, smask=smask,
-            hcore=d["hcore"], Cfull=d["Cfull"],
+        mask, _, _, n_added, smask = expand_mask(
+            d["F"], d["S"], d["nocc"], mask, smask=smask, Cfull=d["Cfull"],
             mol=d["mol"], irrep_nelec=self.ALT_TARGET,
         )
 
@@ -176,12 +182,11 @@ class TestExpandMaskSymmetryAware:
         """
         d = h2o_c2v_scf_data
         smask = copy.deepcopy(start_smask)
-        mask = adb.smask_to_mask(smask, d["mol"].cart)
+        mask = smask_to_mask(smask, d["mol"].cart)
 
-        mask, _, _, n_added, smask = adb.expand_mask(
-            d["F"], d["S"], d["nocc"], mask, smask=smask,
-            hcore=d["hcore"], Cfull=d["Cfull"],
-        )
+        mask, _, _, n_added, smask = expand_mask(
+            d["F"], d["S"], d["nocc"], mask, smask=smask, Cfull=d["Cfull"],
+            )
 
         assert n_added == 1
         assert smask[1][0] == True  # (0, 'O', '2s')
@@ -192,18 +197,17 @@ class TestExpandMaskSymmetryAware:
         mask = np.zeros(d["mol"].nao_nr(), dtype=bool)
         mask[:2] = True
         with pytest.raises(RuntimeError):
-            adb.expand_mask(
-                d["F"], d["S"], d["nocc"], mask,
-                hcore=d["hcore"], Cfull=d["Cfull"],
+            expand_mask(
+                d["F"], d["S"], d["nocc"], mask, Cfull=d["Cfull"],
                 mol=d["mol"], irrep_nelec=self.ALT_TARGET,
             )
 
 
-# ---------------------------------------------------------------------------
-# adb.find_subspace (symmetry-aware mode) -- validation only; the search
-# itself is exercised (slowly) via TestExpandMaskSymmetryAware above and via
-# adaptive_basis/vsap_symmetry_check/ for the real FeF3/aug-pc-2 case.
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.find_subspace (symmetry-aware mode) -- validation only; the search  │
+# │ itself is exercised (slowly) via TestExpandMaskSymmetryAware above and  │
+# │ via adaptive_basis/vsap_symmetry_check/ for the real FeF3/aug-pc-2 case.│
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestFindSubspaceSymmetryAware:
 
@@ -212,7 +216,7 @@ class TestFindSubspaceSymmetryAware:
         mf.verbose = 0
         mf.kernel()
         with pytest.raises(RuntimeError):
-            adb.find_subspace(
+            find_subspace(
                 mf.get_fock(), mf.get_ovlp(), h2o_sto3g_c2v, mf,
                 symmetry_aware=True, verbose=False,
             )
@@ -222,7 +226,7 @@ class TestFindSubspaceSymmetryAware:
         mf.verbose = 0
         mf.kernel()
         with pytest.raises(RuntimeError):
-            adb.find_subspace(
+            find_subspace(
                 mf.get_fock(), mf.get_ovlp(), h2o_sto3g_c2v, mf,
                 symmetry_aware=True,
                 irrep_nelec={'A1': 6, 'B1': 2, 'B2': 2},
@@ -234,7 +238,7 @@ class TestFindSubspaceSymmetryAware:
         mf.verbose = 0
         mf.kernel()
         with pytest.raises(RuntimeError):
-            adb.find_subspace(
+            find_subspace(
                 mf.get_fock(), mf.get_ovlp(), h2o_sto3g_c2v, mf,
                 symmetry_aware=True,
                 irrep_nelec={'A1': 6, 'B1': 2, 'B2': 2},
@@ -248,7 +252,7 @@ class TestFindSubspaceSymmetryAware:
         mf.verbose = 0
         mf.kernel()
         with pytest.raises(RuntimeError):
-            adb.find_subspace(
+            find_subspace(
                 mf.get_fock(), mf.get_ovlp(), h2o_sto3g, mf,
                 symmetry_aware=True,
                 irrep_nelec={'A1': 6, 'B1': 2, 'B2': 2},
@@ -256,9 +260,9 @@ class TestFindSubspaceSymmetryAware:
             )
 
 
-# ---------------------------------------------------------------------------
-# adb.diagonalize_masked
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ calculations.diagonalize_masked                                         │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestDiagonalizeMasked:
 
@@ -269,8 +273,8 @@ class TestDiagonalizeMasked:
         function)."""
         h = np.array([[2.0, 0.3], [0.3, 1.0]])
         s = np.eye(2)
-        e1, c1 = adb.eig(h, s)
-        e2, c2, orbsym = adb.diagonalize_masked(h, s, mol=None)
+        e1, c1 = eig(h, s)
+        e2, c2, orbsym = diagonalize_masked(h, s, mol=None)
         np.testing.assert_allclose(np.real(e1), np.real(e2))
         np.testing.assert_allclose(np.real(c1), np.real(c2))
         assert orbsym is None
@@ -283,14 +287,14 @@ class TestDiagonalizeMasked:
         mf.kernel()
         F, S = mf.get_fock(), mf.get_ovlp()
 
-        shellsep_mol = adb.create_shell_separated_mol(h2o_sto3g_c2v)
-        full_smask = adb.init_smask(shellsep_mol, shellsep_mol.cart)
+        shellsep_mol = create_shell_separated_mol(h2o_sto3g_c2v)
+        full_smask = init_smask(shellsep_mol, shellsep_mol.cart)
         for row in full_smask:
             row[0] = True
 
-        e1, c1, orbsym1 = adb.symmetrized_eig(
+        e1, _, orbsym1 = symmetrized_eig(
             F, S, h2o_sto3g_c2v.symm_orb, h2o_sto3g_c2v.irrep_id)
-        e2, c2, orbsym2 = adb.diagonalize_masked(
+        e2, _, orbsym2 = diagonalize_masked(
             F, S, mol=shellsep_mol, smask=full_smask)
 
         np.testing.assert_allclose(np.sort(np.real(e1)), np.sort(np.real(e2)))
@@ -301,20 +305,20 @@ class TestDiagonalizeMasked:
         assert set(orbsym2.tolist()) <= set(shellsep_mol.irrep_name)
 
 
-# ---------------------------------------------------------------------------
-# adb.get_occupied_orbitals
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.get_occupied_orbitals                                               │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestGetOccupiedOrbitals:
 
     def test_symmetry_blind_restricted(self):
         epsilon_i = np.array([-2.0, -1.0, -0.5, 0.1, 0.2])
-        occ = adb.get_occupied_orbitals(epsilon_i, nocc=(2, 2))
+        occ = get_occupied_orbitals(epsilon_i, nocc=(2, 2))
         assert occ == [(-2.0, None), (-1.0, None)]
 
     def test_symmetry_blind_unrestricted(self):
         epsilon_i = np.array([[-2.0, -1.0, 0.1], [-1.8, -0.9, 0.2]])
-        occ = adb.get_occupied_orbitals(
+        occ = get_occupied_orbitals(
             epsilon_i, nocc=(2, 1), restricted=False)
         assert occ == [(-2.0, None), (-1.0, None), (-1.8, None)]
 
@@ -322,7 +326,7 @@ class TestGetOccupiedOrbitals:
         epsilon_i = np.array([-2.0, -1.0, -0.5, 0.1, 0.2])
         orbsym = np.array(['A1', 'A1', 'B1', 'A1', 'B1'])
         irrep_nelec = {'A1': 4, 'B1': 2}
-        occ = adb.get_occupied_orbitals(
+        occ = get_occupied_orbitals(
             epsilon_i, nocc=(3, 3), irrep_nelec=irrep_nelec, orbsym=orbsym)
         assert sorted(occ) == sorted([(-2.0, 'A1'), (-1.0, 'A1'), (-0.5, 'B1')])
 
@@ -333,20 +337,20 @@ class TestGetOccupiedOrbitals:
         ])
         orbsym = np.array(['A1', 'A1', 'B1'])
         irrep_nelec = {'A1': (2, 1)}
-        occ = adb.get_occupied_orbitals(
+        occ = get_occupied_orbitals(
             epsilon_i, nocc=(2, 1), irrep_nelec=irrep_nelec, orbsym=orbsym,
             restricted=False)
         assert sorted(occ) == sorted([(-2.0, 'A1'), (-1.0, 'A1'), (-1.8, 'A1')])
 
     def test_orbsym_required_with_irrep_nelec(self):
         with pytest.raises(ValueError):
-            adb.get_occupied_orbitals(
+            get_occupied_orbitals(
                 np.array([-1.0]), nocc=(1, 1), irrep_nelec={'A1': 2})
 
 
-# ---------------------------------------------------------------------------
-# find_subspace(track_orbitals=True)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ find_subspace(track_orbitals=True)                                      │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestTrackOrbitals:
 
@@ -356,7 +360,7 @@ class TestTrackOrbitals:
         mf = h2o_sto3g.RHF()
         mf.verbose = 0
         mf.kernel()
-        result = adb.find_subspace(
+        result = find_subspace(
             mf.get_fock(), mf.get_ovlp(), h2o_sto3g, mf,
             conv_tol=1e-2, verbose=False,
         )
@@ -366,7 +370,7 @@ class TestTrackOrbitals:
         mf = h2o_sto3g.RHF()
         mf.verbose = 0
         mf.kernel()
-        result = adb.find_subspace(
+        result = find_subspace(
             mf.get_fock(), mf.get_ovlp(), h2o_sto3g, mf,
             conv_tol=1e-2, verbose=False, track_orbitals=True,
         )
@@ -381,7 +385,7 @@ class TestTrackOrbitals:
         mf = h2o_sto3g.RHF()
         mf.verbose = 0
         mf.kernel()
-        _, orbital_history = adb.find_subspace(
+        _, orbital_history = find_subspace(
             mf.get_fock(), mf.get_ovlp(), h2o_sto3g, mf,
             conv_tol=1e-2, verbose=False, track_orbitals=True,
         )
@@ -395,7 +399,7 @@ class TestTrackOrbitals:
         mf.verbose = 0
         mf.kernel()
         irrep_nelec = mf.get_irrep_nelec()
-        _, orbital_history = adb.find_subspace(
+        _, orbital_history = find_subspace(
             mf.get_fock(), mf.get_ovlp(), h2o_sto3g_c2v, mf,
             conv_tol=1e-2, verbose=False, get_smask=True,
             symmetry_aware=True, irrep_nelec=irrep_nelec, track_orbitals=True,
@@ -407,9 +411,9 @@ class TestTrackOrbitals:
                        for _, irrep in entry["orbitals"])
 
 
-# ---------------------------------------------------------------------------
-# adb.write_orbital_history
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ ioutil.write_orbital_history                                            │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestWriteOrbitalHistory:
 
@@ -419,7 +423,7 @@ class TestWriteOrbitalHistory:
             {"nfunc": 8, "orbitals": [(-1.6, "A1")]},
         ]
         fn = str(tmp_path / "hist")
-        adb.write_orbital_history(orbital_history, fn, molname="h2o", basisname="sto-3g")
+        write_orbital_history(orbital_history, fn, molname="h2o", basisname="sto-3g")
 
         content = (tmp_path / "hist.csv").read_text().splitlines()
         assert content[0] == "# molecule=h2o basis=sto-3g"
@@ -429,9 +433,9 @@ class TestWriteOrbitalHistory:
         assert content[4] == "8,-1.600000000000,A1"
 
 
-# ---------------------------------------------------------------------------
-# adb.get_occupied_orbitals_from_scf
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.get_occupied_orbitals_from_scf                                      │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 class TestGetOccupiedOrbitalsFromSCF:
 
@@ -439,7 +443,7 @@ class TestGetOccupiedOrbitalsFromSCF:
         mf = h2o_sto3g.RHF()
         mf.verbose = 0
         mf.kernel()
-        occ = adb.get_occupied_orbitals_from_scf(mf)
+        occ = get_occupied_orbitals_from_scf(mf)
         assert len(occ) == h2o_sto3g.nelec[0]
         assert all(irrep is None for _, irrep in occ)
         np.testing.assert_allclose(
@@ -450,7 +454,7 @@ class TestGetOccupiedOrbitalsFromSCF:
         mf = h2o_sto3g_c2v.RHF()
         mf.verbose = 0
         mf.kernel()
-        occ = adb.get_occupied_orbitals_from_scf(mf)
+        occ = get_occupied_orbitals_from_scf(mf)
         assert len(occ) == h2o_sto3g_c2v.nelec[0]
         assert all(irrep in h2o_sto3g_c2v.irrep_name for _, irrep in occ)
 
@@ -466,14 +470,14 @@ class TestGetOccupiedOrbitalsFromSCF:
         mf = mol.UHF()
         mf.verbose = 0
         mf.kernel()
-        occ = adb.get_occupied_orbitals_from_scf(mf)
+        occ = get_occupied_orbitals_from_scf(mf)
         assert len(occ) == mol.nelec[0] + mol.nelec[1]
         assert all(irrep is None for _, irrep in occ)
 
 
-# ---------------------------------------------------------------------------
-# adb.mask_analysis(track_orbitals=True)
-# ---------------------------------------------------------------------------
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.mask_analysis(track_orbitals=True)                                  │
+# ╰─────────────────────────────────────────────────────────────────────────╯
 
 @pytest.mark.slow
 class TestMaskAnalysisTrackOrbitals:
@@ -487,8 +491,8 @@ class TestMaskAnalysisTrackOrbitals:
         mf.verbose = 0
         mf.kernel()
         F, S = mf.get_fock(), mf.get_ovlp()
-        shellsep_mol = adb.create_shell_separated_mol(mol)
-        mask_history = adb.find_subspace(
+        shellsep_mol = create_shell_separated_mol(mol)
+        mask_history = find_subspace(
             F, S, mol, mf, conv_tol=0.5, verbose=False,
             get_smask=True, return_mask_history=True,
         )
@@ -496,7 +500,7 @@ class TestMaskAnalysisTrackOrbitals:
 
     def test_default_returns_plain_dataframe(self, h2o_sto3g):
         mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_sto3g)
-        result = adb.mask_analysis(
+        result = mask_analysis(
             mask_history, shellsep_mol, mf, F, S, verbose=False,
             C_full=mf.mo_coeff, calculate_correction=False,
         )
@@ -504,7 +508,7 @@ class TestMaskAnalysisTrackOrbitals:
 
     def test_returns_tuple_when_enabled(self, h2o_sto3g):
         mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_sto3g)
-        result = adb.mask_analysis(
+        result = mask_analysis(
             mask_history, shellsep_mol, mf, F, S, verbose=False,
             C_full=mf.mo_coeff, calculate_correction=False, track_orbitals=True,
         )
@@ -520,7 +524,7 @@ class TestMaskAnalysisTrackOrbitals:
     def test_symmetry_aware_labels_present(self, h2o_sto3g_c2v):
         mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_sto3g_c2v)
         irrep_nelec = mf.get_irrep_nelec()
-        _, orbital_history = adb.mask_analysis(
+        _, orbital_history = mask_analysis(
             mask_history, shellsep_mol, mf, F, S, verbose=False,
             C_full=mf.mo_coeff, irrep_nelec=irrep_nelec,
             calculate_correction=False, track_orbitals=True,
