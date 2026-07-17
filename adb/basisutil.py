@@ -177,23 +177,32 @@ def extract_basis(
     # Append exponents and contraction coefficients
     for key in asymb:
         ogbas = to_general_contraction(shellsep_mol._basis[key])
+        # Look up by each entry's own angular momentum rather than its
+        # position in ogbas -- to_general_contraction only emits one entry
+        # per angular momentum actually present, so position and angular
+        # momentum coincide only when the basis has no l-gaps.
+        ogbas_by_l = {entry[0]: entry for entry in ogbas}
         # Important when initialization does not put functions on all
         # atoms in the molecule, would result in error
         if basis[key] is None:
             continue
+        kept_shells = []
         for shell in basis[key]:
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
             idxs = [idx[3][4] - idx[2] for idx in key_smask if idx[2] == i]
-            coeff_table = numpy.asarray(ogbas[i][1:], dtype=float)[:, [0] + idxs]
+            coeff_table = numpy.asarray(ogbas_by_l[i][1:], dtype=float)[:, [0] + idxs]
             # Remove rows and columns with all 0 contraction coeffs
             filtered_shell = coeff_table[
                 ~((coeff_table[:, 0] != 0) &
                 (coeff_table[:, 1:] == 0).all(axis = 1))]
             filtered_shell = filtered_shell[~numpy.all(filtered_shell == 0, axis = 1)]
-            if not filtered_shell.tolist():
-                basis[key].pop(i)
-            else:
+            if filtered_shell.tolist():
                 shell.extend(filtered_shell.tolist())
+                kept_shells.append(shell)
+        # Keep the "no shells for this atom" convention consistent with the
+        # None check above (an atom whose every selected shell filtered out
+        # is indistinguishable from one that was never populated).
+        basis[key] = kept_shells if kept_shells else None
     ecp = shellsep_mol._ecp if shellsep_mol._ecp != {} else None
     return basis, ecp

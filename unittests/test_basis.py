@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import pyscf
 from pyscf import gto
+import adb.basisutil
 from adb import (
     create_shell_separated_mol, create_subbasis_mol, init_smask, extract_basis,
     find_projected_minimal_basis_mask, get_array_of_angular_momenta_and_atom_id,
@@ -117,6 +118,110 @@ class TestExtractBasis:
         smask[:, 0] = True
         _, ecp = extract_basis(smask, shellsep)
         assert ecp is None
+
+    def test_noncontiguous_selection_on_standard_basis(self, h2o_def2tzvp):
+        """Dropping an entire angular momentum from the mask (keep O's S and
+        D shells, drop all of its P shells) must not crash and must extract
+        the right shells -- this is the kind of non-contiguous *selection*
+        the adaptive greedy search can produce day to day. (On a standard,
+        angular-momentum-contiguous basis set like def2-tzvp this actually
+        doesn't exercise the historical indexing bug below -- ogbas is built
+        from the full, unmasked basis at every call site, so position
+        happens to equal angular momentum regardless of what's selected.
+        This test instead documents/guards the expected composition for
+        ordinary sparse selections.)"""
+        mol = h2o_def2tzvp
+        shellsep = create_shell_separated_mol(mol)
+        smask = init_smask(shellsep)
+        for row in smask:
+            row[0] = not (row[2] == 1 and row[3][1] == 'O')
+
+        basis, _ = extract_basis(smask, shellsep)
+        oxygen_angls = {shell[0] for shell in basis['O']}
+        assert 1 not in oxygen_angls
+        assert oxygen_angls == {0, 2, 3}
+
+        rebuilt = gto.Mole(
+            atom=mol.atom, basis=basis, charge=mol.charge,
+            spin=mol.spin, unit=mol.unit, verbose=0,
+        )
+        rebuilt.build()
+        expected_nao = sum(int(sm[1]) for sm in smask if sm[0])
+        assert rebuilt.nao == expected_nao
+
+    def test_gapped_basis_definition_does_not_crash(self):
+        """Regression test for the `ogbas[i]` half of the historical
+        positional-vs-angular-momentum indexing bug. `to_general_contraction`
+        only emits one entry per angular momentum *actually present*, so
+        position and angular momentum coincide only when the basis has no
+        l-gaps -- true for essentially every named basis set (hence
+        test_noncontiguous_selection_on_standard_basis above doesn't trigger
+        it), but not guaranteed. This hand-built O basis (S and D shells
+        only, no P) makes the *full* basis itself gapped, which reproduces
+        the crash directly: confirmed against the pre-fix code, this raised
+        `IndexError: list index out of range` from the `ogbas[i]` line."""
+        o_gapped_basis = [
+            [0, [130.70932, 0.15432897], [23.808861, 0.53532814], [6.4436083, 0.44463454]],
+            [2, [1.0, 1.0]],
+        ]
+        mol = pyscf.M(
+            atom="O 0 0 0; H 0 0.757 0.587; H 0 -0.757 0.587",
+            basis={'O': o_gapped_basis, 'H': 'sto-3g'},
+            verbose=0,
+        )
+        shellsep = create_shell_separated_mol(mol)
+        smask = init_smask(shellsep)
+        smask[:, 0] = True
+
+        basis, _ = extract_basis(smask, shellsep)
+        assert {shell[0] for shell in basis['O']} == {0, 2}
+
+        rebuilt = gto.Mole(atom=mol.atom, basis=basis, verbose=0)
+        rebuilt.build()
+        assert rebuilt.nao == shellsep.nao
+
+    def test_all_zero_contraction_drops_correct_shell_not_by_position(
+            self, monkeypatch, h2o_def2tzvp):
+        """Regression test for the `basis[key].pop(i)` half of the historical
+        bug -- distinct from test_gapped_basis_definition_does_not_crash
+        above, which only exercises the neighboring `ogbas[i]` line. Even
+        when `ogbas[i]` is correct (a contiguous full basis), `pop(i)` used
+        list *position* `i` (an angular momentum value) on `basis[key]`,
+        which genuinely is angular-momentum-sparse under an ordinary mask
+        selection. Forcing that path requires a selected shell's contraction
+        column to filter down to all-zero, which real basis coefficients
+        never do -- so `to_general_contraction` is monkeypatched to inject
+        one all-zero D-shell column while leaving everything else real.
+        Confirmed against the pre-fix code, this raises `IndexError: pop
+        index out of range` (`basis['O'] = [[0], [2]]`, `.pop(2)`)."""
+        mol = h2o_def2tzvp
+        shellsep = create_shell_separated_mol(mol)
+        smask = init_smask(shellsep)
+        for sm in smask:
+            if sm[3][1] == 'O':
+                # O: keep all S shells, drop P and F entirely, keep only
+                # the first of O's two D shells (n_remove_ecp == 3).
+                sm[0] = (sm[2] == 0) or (sm[2] == 2 and sm[3][4] == 3)
+            else:
+                sm[0] = True
+
+        original = adb.basisutil.to_general_contraction
+
+        def fake_to_general_contraction(basis):
+            real = original(basis)
+            if [entry[0] for entry in real] == [0, 1, 2, 3]:
+                # Replace O's D entry (index 2) with one whose sole
+                # contraction column is entirely zero -- filtered_shell
+                # ends up empty, so this shell must be dropped.
+                zeroed_d = [2, [1.5, 0.0], [0.6, 0.0]]
+                return [real[0], real[1], zeroed_d, real[3]]
+            return real
+
+        monkeypatch.setattr(
+            adb.basisutil, "to_general_contraction", fake_to_general_contraction)
+
+        basis, _ = extract_basis(smask, shellsep)
+        assert {shell[0] for shell in basis['O']} == {0}
 
 
 # ╭─────────────────────────────────────────────────────────────────────────╮
