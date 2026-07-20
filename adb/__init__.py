@@ -74,6 +74,10 @@ from .ioutil import (
     function_labels_from_mask,
 )
 
+from .scf_fixes import (
+    symmetry_safe_newton,
+)
+
 from . import CONSTANTS
 from .CONSTANTS import (
     VARIANTS, NFUNCS, ANGULAR, ELEMENTS,
