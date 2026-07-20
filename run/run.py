@@ -159,24 +159,15 @@ def run_abs(
         myhf.kernel()
 
         # Restore default parameters and switch to second order CIAH.
-        # The coarse level-shifted warmup above only approximately respects
-        # mol's point-group symmetry -- Newton's orbital-rotation step
-        # labels orbital symmetry at every micro-iteration with a strict
-        # (1e-9) tolerance, so hand it an explicitly symmetrized MO space
-        # rather than relying on the warmup having converged that cleanly.
-        mo_coeff_sym = myhf.mo_coeff
-        if mol.symmetry and mol.groupname != 'C1':
-            if is_restricted:
-                mo_coeff_sym = pyscf.symm.symmetrize_space(mol, myhf.mo_coeff)
-            else:
-                mo_coeff_sym = [
-                    pyscf.symm.symmetrize_space(mol, myhf.mo_coeff[0]),
-                    pyscf.symm.symmetrize_space(mol, myhf.mo_coeff[1]),
-                ]
-        myhf = myhf.newton()
+        # Use adb.symmetry_safe_newton rather than .newton() directly: with
+        # mol.symmetry enabled and a large/diffuse basis where
+        # remove_linear_dep_ (above) actually drops linearly-dependent AO
+        # combinations, plain pyscf .newton() crashes -- see
+        # adb/scf_fixes.py for the root cause and fix.
+        myhf = adb.symmetry_safe_newton(myhf)
         myhf.level_shift = 0.0
         myhf.max_cycle = 50
-        myhf.kernel(mo_coeff_sym, myhf.mo_occ)
+        myhf.kernel()
 
         end = time()
         e_tot = myhf.e_tot
@@ -471,7 +462,10 @@ def compute_fullbasis_criterion(
             myhf.level_shift = 1.0
             myhf.max_cycle = 3
             myhf.kernel()
-            myhf = myhf.newton()
+            # See adb/scf_fixes.py: plain .newton() crashes when
+            # mol.symmetry is enabled and remove_linear_dep_ (above) has
+            # actually reduced the basis.
+            myhf = adb.symmetry_safe_newton(myhf)
             myhf.level_shift = 0.0
             myhf.max_cycle = 50
             myhf.kernel()
