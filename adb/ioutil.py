@@ -57,7 +57,7 @@ def get_molecules_in_dir(
             continue
         _console.print(f"Reading file {fn}", style="cyan", markup=False)
 
-        if symmetry_fname is not None:
+        if symmetry and symmetry_fname is not None:
             symm = point_group_from_file(symmetry_fname, molfname)
         else:
             symm = symmetry
