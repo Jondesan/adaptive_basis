@@ -1,3 +1,7 @@
+"""Shared constants for the adb package: search-criterion variants, shell
+function counts, angular-momentum labels, periodic table symbols, and a
+couple of numerical tolerances used by :mod:`adb.search`.
+"""
 
 # Available criterion variants
 VARIANTS = [

@@ -1,36 +1,58 @@
+from copy import deepcopy
+from itertools import count
+
+import numpy as np
 from pyscf import gto
 from pyscf.gto.ecp import core_configuration
 from pyscf.data.elements import _std_symbol
-import numpy
-from copy import deepcopy
-from itertools import count
+
 from . import CONSTANTS
 
 
-def init_smask(
-        mol:    gto.MoleBase,
-        cart:   bool          = False) -> numpy.ndarray:
-    """Initialize the shell mask array. smask will be a list of lists,
-    with length equal to the number of uncontracted shells, and each
-    element is a two element list, first is bool that specifies the mask
-    for the current shell, the other how many primitives in this shell.
-    """
+def init_smask(mol: gto.MoleBase, cart: bool = False) -> np.ndarray:
+    """Build the initial (all-`False`) shell mask for `mol`.
 
+    A shell mask ("smask") is an object array with one row per uncontracted
+    shell (i.e. per row of a shell-separated mol's ``_bas``), each row
+    ``[selected, nfuncs, angl, (atom_id, atom_symbol, shell_index,
+    angl_label, ecp_adjusted_shell_index)]``:
+
+    - ``selected`` : bool -- whether this shell is toggled on. Always
+      `False` here.
+    - ``nfuncs`` : int -- number of AO functions this shell contributes
+      (spherical or Cartesian, per `cart`).
+    - ``angl`` : int -- angular momentum quantum number.
+    - the 5-tuple identifies the shell for labeling/linking purposes; ECP
+      core shells are excluded from the shell numbering (`ecp_adjusted_shell_index`).
+
+    Parameters
+    ----------
+    mol : pyscf.gto.MoleBase
+        Molecule object, typically shell-separated (see
+        `adb.molutil.create_shell_separated_mol`).
+    cart : bool, default False
+        Whether `mol` uses Cartesian (rather than spherical) AOs.
+
+    Returns
+    -------
+    ndarray, dtype=object, shape (nbas, 4)
+        The initial shell mask, every shell deselected.
+    """
     smask = []
 
-    count = numpy.zeros((mol.natm, 9), dtype=int)
+    shell_count = np.zeros((mol.natm, 9), dtype=int)
     for ib in range(mol.nbas):
-        ia = mol.bas_atom(ib)       # atom that given basis function sits on
-        angl = mol.bas_angular(ib)  # angular momentum angl of given basis function
-        nc = mol.bas_nctr(ib)       # number of CGTOs for given shell
-        symb = mol.atom_symbol(ia)  # label of given atom
-        nelec_ecp = mol.atom_nelec_core(ia)  # Number of ecp electrons
+        ia = mol.bas_atom(ib)
+        angl = mol.bas_angular(ib)
+        nc = mol.bas_nctr(ib)
+        symb = mol.atom_symbol(ia)
+        nelec_ecp = mol.atom_nelec_core(ia)
         if nelec_ecp == 0 or angl > 3:
-            shl_start = count[ia, angl] + angl + 1
+            shl_start = shell_count[ia, angl] + angl + 1
         else:
-            coreshl = core_configuration(nelec_ecp, atom_symbol = _std_symbol(symb))
-            shl_start = coreshl[angl] + count[ia, angl] + angl + 1
-        count[ia, angl] += nc
+            coreshl = core_configuration(nelec_ecp, atom_symbol=_std_symbol(symb))
+            shl_start = coreshl[angl] + shell_count[ia, angl] + angl + 1
+        shell_count[ia, angl] += nc
         for n in range(shl_start, shl_start + nc):
             if nelec_ecp == 0 or angl > 3:
                 n_remove_ecp = n
@@ -45,13 +67,24 @@ def init_smask(
                 ]
             )
 
-    return numpy.array(smask, dtype=object)
+    return np.array(smask, dtype=object)
 
 
-def smask_to_mask(
-        smask:  numpy.ndarray,
-        cart:   bool        = False) -> numpy.ndarray:
-    """Convert current shell mask into function mask."""
+def smask_to_mask(smask: np.ndarray, cart: bool = False) -> np.ndarray:
+    """Expand a shell mask into a per-function (AO) mask.
+
+    Parameters
+    ----------
+    smask : ndarray
+        Shell mask, as returned by `init_smask`.
+    cart : bool, default False
+        Whether `smask` describes Cartesian (rather than spherical) AOs.
+
+    Returns
+    -------
+    ndarray, dtype=bool, shape (nao,)
+        `True` for every AO belonging to a selected shell.
+    """
     funcs_per_shell = [
         ((s[2] + 1) * (s[2] + 2) // 2 if cart else 2 * s[2] + 1) for s in smask
     ]
@@ -61,99 +94,149 @@ def smask_to_mask(
             rb = sum(funcs_per_shell[:i])
             re = rb + sm[1]
             mask[rb:re] = [True] * (re - rb)
-    return numpy.array(mask, dtype=bool)
+    return np.array(mask, dtype=bool)
 
 
-def mask_to_smask(
-        mask:   numpy.ndarray,
-        smask:  numpy.ndarray,
-        cart:   bool        = False) -> numpy.ndarray:
-    """Flip shells of smask to True that have 1 or more functions set to
-    True in mask.
+def mask_to_smask(mask: np.ndarray, smask: np.ndarray, cart: bool = False) -> np.ndarray:
+    """Select every shell in `smask` that has one or more functions selected in `mask`.
+
+    Parameters
+    ----------
+    mask : ndarray
+        Per-function (AO) mask.
+    smask : ndarray
+        Shell mask to update in place (and return).
+    cart : bool, default False
+        Whether `mask`/`smask` describe Cartesian (rather than spherical)
+        AOs.
+
+    Returns
+    -------
+    ndarray
+        `smask`, with every shell containing a selected AO now selected.
     """
     mapping = maskidx_to_smaskidx(mask, smask, cart)
-    for i in numpy.argwhere(mask):
+    for i in np.argwhere(mask):
         smask[mapping[i[0]]][0] = True
 
     return smask
 
 
-def linked_shell_idx(smask: numpy.ndarray) -> numpy.ndarray:
-    """ Return smask indices that correspond to duplicate shells, i.e.
-    if molecule has more than one of same atom type, the shells of that
-    atom will be duplicated.
+def linked_shell_idx(smask: np.ndarray) -> list[list[int]]:
+    """Group shell-mask indices by symmetry-equivalent (duplicate) shells.
 
-    Args:
-        smask : ndarray
-            Shell mask array
+    If a molecule has more than one atom of the same element, each of
+    those atoms' shells are duplicates of one another; `expand_mask` uses
+    this grouping to toggle all of them together (`link_shells=True`).
 
-    Returns:
-        shl_indices : ndarray
-            Duplicate shell indices
+    Parameters
+    ----------
+    smask : ndarray
+        Shell mask array.
+
+    Returns
+    -------
+    list of list of int
+        One list of `smask` indices per distinct shell "identity" (angular
+        momentum + shell label, shared across symmetry-equivalent atoms).
     """
     atoms_found = []
     shells = ["".join([str(s) for s in sm[3][1:]]) for sm in smask]
 
     shl_indices = []
-    for i, sm in enumerate(smask):
-        if "".join([str(s) for s in sm[3][1:]]) not in atoms_found:
-            atoms_found.append("".join([str(s) for s in sm[3][1:]]))
-            indices = [
-                ind
-                for ind, ele in zip(count(), shells)
-                if ele == "".join([str(s) for s in sm[3][1:]])
-            ]
+    for sm in smask:
+        shell_id = "".join([str(s) for s in sm[3][1:]])
+        if shell_id not in atoms_found:
+            atoms_found.append(shell_id)
+            indices = [ind for ind, ele in zip(count(), shells) if ele == shell_id]
             shl_indices.append(indices)
     return shl_indices
 
 
-def get_all_shell_labels(mol: gto.MoleBase) -> list[str]:
-    count = numpy.zeros((mol.natm, 9), dtype=int)
+def get_all_shell_labels(mol: gto.MoleBase) -> list[tuple[int, str, str]]:
+    """List every shell of `mol` as ``(atom_id, atom_symbol, shell_label)``.
+
+    ``shell_label`` follows the usual quantum-chemistry convention, e.g.
+    ``'2S'``, ``'3P'`` (shell index, then angular-momentum letter); ECP
+    core shells are excluded from the shell numbering.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.MoleBase
+        Molecule object.
+
+    Returns
+    -------
+    list of (int, str, str)
+        One ``(atom_id, atom_symbol, shell_label)`` tuple per shell, in
+        `mol`'s internal shell order.
+    """
+    shell_count = np.zeros((mol.natm, 9), dtype=int)
     labels = []
-    for ib in range(mol.nbas):  # nbas = number of shells (basis fcts)
-        ia = mol.bas_atom(ib)   # atom that given basis function sits on
-        l = mol.bas_angular(ib) # angular momentum l of basis function
-        strl = CONSTANTS.ANGULAR[l] # angular momentum label
-        nc = mol.bas_nctr(ib)   # number of CGTOs for given shell
-        symb = mol.atom_symbol(ia)  # label of given atom
-        nelec_ecp = mol.atom_nelec_core(ia) # Number of ecp electrons
+    for ib in range(mol.nbas):
+        ia = mol.bas_atom(ib)
+        l = mol.bas_angular(ib)
+        strl = CONSTANTS.ANGULAR[l]
+        nc = mol.bas_nctr(ib)
+        symb = mol.atom_symbol(ia)
+        nelec_ecp = mol.atom_nelec_core(ia)
 
         if nelec_ecp == 0 or l > 3:
-            shl_start = count[ia,l]+l+1
+            shl_start = shell_count[ia, l] + l + 1
         else:
             coreshl = core_configuration(nelec_ecp, atom_symbol=_std_symbol(symb))
-            shl_start = coreshl[l]+count[ia,l]+l+1
-        count[ia,l] += nc
-        for n in range(shl_start, shl_start+nc):
+            shl_start = coreshl[l] + shell_count[ia, l] + l + 1
+        shell_count[ia, l] += nc
+        for n in range(shl_start, shl_start + nc):
             labels.append((ia, symb, '%d%s' % (n, strl)))
 
     return labels
 
 
-def link_shells(mol, mask):
-    """Toggle functions corresponding to same atoms on and toggle all
-    functions within a shell.
+def link_shells(mol: gto.MoleBase, mask: np.ndarray) -> np.ndarray:
+    """Round a per-function mask up to whole shells, atom-linked.
 
-    Args:
-        mol : pyscf.got.MoleBase
-            The molecule object
-        mask : numpy.ndarray
-            The function mask
+    Any AO in `mask` pulls its whole shell in (via `mask_to_smask`), for
+    every symmetry-equivalent atom of the same element (via `init_smask`'s
+    duplicate-shell bookkeeping) -- i.e. toggling one function on one atom
+    toggles the matching function on every chemically-equivalent atom too.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.MoleBase
+        Molecule object.
+    mask : ndarray
+        Per-function (AO) mask.
+
+    Returns
+    -------
+    ndarray, dtype=bool
+        The shell-and-atom-rounded mask.
     """
-
-    smask = mask_to_smask(
-        mask,
-        init_smask(mol, mol.cart),
-        mol.cart)
-
+    smask = mask_to_smask(mask, init_smask(mol, mol.cart), mol.cart)
     return smask_to_mask(smask, mol.cart)
 
 
-def get_atom_shell_label(
-        mol: gto.MoleBase,
-        shl_idx: int,
-        link_shells: bool = False
-    ) -> str:
+def get_atom_shell_label(mol: gto.MoleBase, shl_idx: int, link_shells: bool = False) -> str:
+    """Human-readable label for one shell.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.MoleBase
+        Molecule object.
+    shl_idx : int
+        Index into `get_all_shell_labels(mol)`.
+    link_shells : bool, default False
+        If `True`, omit the atom index (e.g. ``'H 2S'`` instead of
+        ``'1 H 2S'``) -- used when the shell was toggled for every
+        symmetry-equivalent atom at once.
+
+    Returns
+    -------
+    str
+        ``'<atom_symbol> <shell_label>'`` if `link_shells`, else
+        ``'<atom_id> <atom_symbol> <shell_label>'``.
+    """
     labels = get_all_shell_labels(mol)
 
     if link_shells:
@@ -161,58 +244,94 @@ def get_atom_shell_label(
     return '%d %s %s' % labels[shl_idx]
 
 
-def print_shells(mol: gto.MoleBase, smask: numpy.ndarray) -> None:
+def print_shells(mol: gto.MoleBase, smask: np.ndarray) -> None:
+    """Print one line per selected shell in `smask`.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.MoleBase
+        Molecule object.
+    smask : ndarray
+        Shell mask.
+    """
     labels = get_all_shell_labels(mol)
-    for i,sm in enumerate(smask):
+    for i, sm in enumerate(smask):
         if not sm[0]:
             continue
         print('Atom %d, symb: %s, shell: %s' % labels[i])
 
 
-def maskidx_to_smaskidx(
-        mask:   numpy.ndarray,
-        smask:  numpy.ndarray,
-        cart:   bool        = False) -> list:
-    """Create mapping between mask and smask"""
+def maskidx_to_smaskidx(mask: np.ndarray, smask: np.ndarray, cart: bool = False) -> list[int]:
+    """Map every AO index in `mask` to its owning shell index in `smask`.
+
+    Parameters
+    ----------
+    mask : ndarray
+        Per-function (AO) mask (only its length is used).
+    smask : ndarray
+        Shell mask.
+    cart : bool, default False
+        Whether `mask`/`smask` describe Cartesian (rather than spherical)
+        AOs.
+
+    Returns
+    -------
+    list of int
+        `mapping[i]` is the `smask` row index owning AO `i`.
+    """
     mapping = [0] * len(mask)
     counter = 0
     for i, sm in enumerate(smask):
         angl = sm[2]
-        for j in range((angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1):
+        for _ in range((angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1):
             mapping[counter] = i
             counter += 1
     return mapping
 
 
-def set_linked_shells(smask:  numpy.ndarray) -> numpy.ndarray:
-    """Set smask to 'val' at linked shell positions.
+def set_linked_shells(smask: np.ndarray) -> np.ndarray:
+    """Select every shell that is symmetry-linked to an already-selected shell.
+
+    For each already-selected shell, finds every other shell sharing the
+    same identity (angular momentum + shell label -- see
+    `linked_shell_idx`) across symmetry-equivalent atoms, and selects those
+    too.
+
+    Parameters
+    ----------
+    smask : ndarray
+        Shell mask.
+
+    Returns
+    -------
+    ndarray
+        A copy of `smask` with all symmetry-linked shells selected.
     """
     csmask = deepcopy(smask)
-    selected_shells = numpy.argwhere([sm[0] for sm in csmask])
-    all_shells = numpy.array([''.join(map(str, sm[3][1:])) for sm in csmask])
-    same_as_selected = numpy.argwhere(all_shells == all_shells[selected_shells])[:,1]
-    csmask[same_as_selected,0] = True
+    selected_shells = np.argwhere([sm[0] for sm in csmask])
+    all_shells = np.array([''.join(map(str, sm[3][1:])) for sm in csmask])
+    same_as_selected = np.argwhere(all_shells == all_shells[selected_shells])[:, 1]
+    csmask[same_as_selected, 0] = True
     return csmask
 
 
-def mask_matrix(
-        mat:                numpy.ndarray,
-        mask:               numpy.ndarray) -> numpy.ndarray:
-    """Return masked matrix
+def mask_matrix(mat: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Restrict a matrix to the AOs selected by `mask`, along every AO axis.
 
-    Args:
-        mat : ndarray
-            Matrix, e.g. Fock matrix. If using restricted Hartree-Fock,
-            should be 2D. If using unrestricted, 3D with alpha and beta
-            matrices as the array elements along axis 0 if such matrix.
-            (overlap matrix will only have one matrix in UHF).
-            The dimension is determined automatically.
-        mask : array
-            The basis mask.
+    Parameters
+    ----------
+    mat : ndarray, shape (nao, nao) or (2, nao, nao)
+        Matrix to mask, e.g. a Fock or overlap matrix. Restrictedness is
+        inferred from `mat.ndim`: 2D is masked on both axes; a leading
+        spin axis of length 2 (unrestricted) is masked on the trailing two
+        axes only.
+    mask : ndarray, dtype=bool, shape (nao,)
+        The AO mask.
 
-    Returns:
-        masked_mat : ndarray
-            The masked matrix
+    Returns
+    -------
+    ndarray
+        The masked matrix, shape ``(n_sel, n_sel)`` or ``(2, n_sel, n_sel)``.
     """
-    is_restricted = (len(mat.shape) == 2)
+    is_restricted = (mat.ndim == 2)
     return mat[mask, :][:, mask] if is_restricted else mat[:, mask, :][:, :, mask]

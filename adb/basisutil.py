@@ -1,33 +1,41 @@
-from pyscf.gto import MoleBase
-import numpy
 from copy import deepcopy
+
+import numpy as np
+from pyscf.gto import MoleBase
+from pyscf.gto.basis.parse_nwchem import (
+    convert_basis_to_nwchem,
+    convert_ecp_to_nwchem,
+    to_general_contraction,
+)
+
 from . import CONSTANTS
-from pyscf.gto.basis.parse_nwchem import convert_basis_to_nwchem, convert_ecp_to_nwchem, to_general_contraction
 
-def get_uncontracted_basis(
-        mol:    MoleBase,
-        fn:     str | None    = None) -> str:
-    """Unravel the contracted basis of mol.
 
-    Args:
-        mol : pyscf.MoleBase object
-            molecule object.
-        fn : None or str
-            the file name to which write the basis. If None, basis will
-            not be written into a file, only returned as a str.
+def get_uncontracted_basis(mol: MoleBase, fn: str | None = None) -> str:
+    """Unravel `mol`'s contracted basis into one shell per contraction.
 
-    Returns:
-        The basis as a pySCF formatted string, which can be used with
-        pyscf.gto.basis.parse.
+    Parameters
+    ----------
+    mol : pyscf.gto.MoleBase
+        Molecule object.
+    fn : str, optional
+        If given, also write the basis to ``tempbasis/<fn>.dat`` in NWChem
+        format.
+
+    Returns
+    -------
+    str
+        The basis as an NWChem-formatted string, parseable by
+        `pyscf.gto.basis.parse`.
     """
-    line  = 'BASIS "ao basis" PRINT\n'
+    line = 'BASIS "ao basis" PRINT\n'
     basis = ""
 
     if fn is not None:
         f = open("tempbasis/" + fn + ".dat", "w")
         f.write(line)
 
-    asymb = list(set([mol.atom_pure_symbol(i) for i in range(len(mol._atom))]))
+    asymb = list(set(mol.atom_pure_symbol(i) for i in range(len(mol._atom))))
     for asy in asymb:
         line = "#BASIS SET:\n"
         basis += line
@@ -35,12 +43,10 @@ def get_uncontracted_basis(
             f.write(line)
 
         for shell in mol._basis[asy]:
-            coeffs = numpy.array(shell[1:])
+            coeffs = np.array(shell[1:])
             contractions = coeffs.shape[1]
             for i in range(1, contractions):
-                line = (
-                    asy + "\t" + CONSTANTS.ANGULAR[shell[0]].capitalize() + "\n"
-                )
+                line = asy + "\t" + CONSTANTS.ANGULAR[shell[0]].capitalize() + "\n"
                 basis += line
                 if fn is not None:
                     f.write(line)
@@ -57,41 +63,59 @@ def get_uncontracted_basis(
 
 
 def get_basis_dict(basis: str) -> dict:
-    """Convert a basis string into a dictionary to pass
-    to pyscf.gto.basis.parse
+    """Parse an NWChem-formatted basis string into a pyscf basis dict.
+
+    Parameters
+    ----------
+    basis : str
+        NWChem-formatted basis string, e.g. as returned by
+        `get_uncontracted_basis`.
+
+    Returns
+    -------
+    dict
+        Maps each atom symbol to its `pyscf.gto.basis.parse`-formatted
+        basis.
     """
     from pyscf.gto.basis import parse
 
-    dc = dict()
+    dc = {}
     for elem in basis.split("#")[1:]:
         dc[elem[11]] = parse(str(elem[11:]))
     return dc
 
 
 def basis_to_file_nwchem(
-    basis:              dict,
-    fn:                 str,
-    ecp_basis:          dict | None = None,
-    commentstring:      str         = "",
-    bsname:             str         = "ao basis",
-    cart:               bool        = False,
-    print_noprint:      str         = "print",
-    additional_labels:  str         = "" ) -> None:
-    """Converts the basis to NWChem format and writes it into a file.
+        basis:              dict,
+        fn:                 str,
+        ecp_basis:          dict | None = None,
+        commentstring:      str         = "",
+        bsname:             str         = "ao basis",
+        cart:               bool        = False,
+        print_noprint:      str         = "print",
+        additional_labels:  str         = "",
+        ) -> None:
+    """Write a pyscf-format basis (and optional ECP) to an NWChem-format file.
 
-    Args:
-        basis : dict
-            PySCF formatted basis structure
-        fn : str
-            File name for basis file
-        bsname : str
-            Basis name for basis file data
-        cart : bool
-            Whether basis in cartesian or spherical geometry
-        print_noprint : str
-            NWChem print option
-        additional_labels : str
-            Additional NWChem options
+    Parameters
+    ----------
+    basis : dict
+        pyscf-formatted basis, one entry per atom symbol.
+    fn : str
+        Output file name (``.nw`` is appended).
+    ecp_basis : dict, optional
+        pyscf-formatted ECP basis, written as a trailing ``ECP`` block if
+        given.
+    commentstring : str, default ""
+        Comment lines to prepend, ``'#'``-separated.
+    bsname : str, default "ao basis"
+        Basis set name recorded in the file header.
+    cart : bool, default False
+        Whether the basis is Cartesian (rather than spherical).
+    print_noprint : str, default "print"
+        NWChem ``print``/``noprint`` option.
+    additional_labels : str, default ""
+        Extra text appended to the ``BASIS`` header line.
     """
     sph_cart = "cartesian" if cart else "spherical"
     with open(fn + '.nw', "w") as f:
@@ -115,33 +139,35 @@ def basis_to_file_nwchem(
                 f.write('\n')
             f.write("END")
 
-    return
 
+def extract_basis(smask: np.ndarray, shellsep_mol: MoleBase) -> tuple[dict, dict | None]:
+    """Extract the basis described by a shell mask, as a pyscf-format dict.
 
-def extract_basis(
-        smask:          numpy.ndarray,
-        shellsep_mol:   MoleBase
-    ) -> tuple[dict, dict | None]:
-    """Extract a basis from given shell mask as python dictionary in
-    pySCF format.
+    Parameters
+    ----------
+    smask : ndarray
+        Shell mask (see `adb.maskutil.init_smask`). The basis is extracted
+        according to which shells are selected.
+    shellsep_mol : pyscf.gto.MoleBase
+        Shell-separated molecule (see
+        `adb.molutil.create_shell_separated_mol`) whose basis `smask`
+        indexes into.
 
-    Args:
-        smask : ndarray
-            Shell mask. Basis will be extracted according to this.
+    Returns
+    -------
+    basis : dict
+        The masked basis, one entry per atom symbol, in pyscf format. An
+        atom whose every selected shell filters out to nothing (see the
+        implementation note below) maps to `None`, consistent with an atom
+        that was never populated.
+    ecp_basis : dict or None
+        The ECP basis dict, if `shellsep_mol` has one, else `None`.
 
-        shellsep_mol : pyscf.MoleBase object
-            molecule object from whose basis the new basis will be
-            extracted.
-
-    Returns:
-        basis : dict
-            the masked basis of the molecule as a dictionary according
-            pySCF format.
-        ecp_basis : none | dict
-            the ECP basis dictionary if present in the full basis of
-            shellsep_mol. Otherwise returns None.
+    Raises
+    ------
+    ValueError
+        If `smask`'s length doesn't match `shellsep_mol._bas`.
     """
-
     if len(smask) != len(shellsep_mol._bas):
         raise ValueError(
             "Shell mask does not match with _bas attribute!"
@@ -157,7 +183,7 @@ def extract_basis(
     current_id = -1
     # Collect unique atom smasks (if same atom is present in the shellsep_mol
     # more than once, ignore its mask after the first one)
-    for elem in deepcopy(smask[numpy.asarray(smask[:, 0], dtype = bool)]):
+    for elem in deepcopy(smask[np.asarray(smask[:, 0], dtype=bool)]):
         if elem[3][1] not in found_atoms:
             found_atoms.append(elem[3][1])
             current_id = elem[3][0]
@@ -165,7 +191,7 @@ def extract_basis(
             continue
         duplicate_removed_smask.append(elem)
 
-    duplicate_removed_smask = numpy.array(duplicate_removed_smask)
+    duplicate_removed_smask = np.array(duplicate_removed_smask)
     # Initialize distinct atoms' dictionary formatted basis structures
     # with angular momentum angl
     for angl, shl in duplicate_removed_smask[:, [2, 3]]:
@@ -191,12 +217,12 @@ def extract_basis(
             i = shell[0]
             key_smask = [drs for drs in duplicate_removed_smask if drs[3][1] == key]
             idxs = [idx[3][4] - idx[2] for idx in key_smask if idx[2] == i]
-            coeff_table = numpy.asarray(ogbas_by_l[i][1:], dtype=float)[:, [0] + idxs]
+            coeff_table = np.asarray(ogbas_by_l[i][1:], dtype=float)[:, [0] + idxs]
             # Remove rows and columns with all 0 contraction coeffs
             filtered_shell = coeff_table[
                 ~((coeff_table[:, 0] != 0) &
-                (coeff_table[:, 1:] == 0).all(axis = 1))]
-            filtered_shell = filtered_shell[~numpy.all(filtered_shell == 0, axis = 1)]
+                  (coeff_table[:, 1:] == 0).all(axis=1))]
+            filtered_shell = filtered_shell[~np.all(filtered_shell == 0, axis=1)]
             if filtered_shell.tolist():
                 shell.extend(filtered_shell.tolist())
                 kept_shells.append(shell)
