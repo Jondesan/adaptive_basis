@@ -1,29 +1,54 @@
-""" The core ADB greedy search algorithm: 
-    find_subspace and its per-step worker expand_mask
-"""
+"""The core ADB greedy search algorithm: find_subspace and its per-step worker expand_mask."""
 
 import copy
 from operator import itemgetter
+
 import numpy as np
 from pyscf import gto, scf
-from .calculations import eig, get_iteration_criteria_value, diagonalize_masked
-from .maskutil import (
-    init_smask, mask_to_smask, smask_to_mask, set_linked_shells,
-    linked_shell_idx, mask_matrix,
-    )
-from .molutil import create_shell_separated_mol
+
+from .calculations import (
+    diagonalize_masked,
+    eig,
+    get_iteration_criteria_value
+)
+from .CONSTANTS import EXPAND_MASK_EPS, NFUNCS
+from .initialization import (
+    atomic_block_minimal_basis,
+    find_projected_minimal_basis_mask
+)
 from .ioutil import (
-    print_find_subspace_start, warn_conflicting_initialization,
+    print_find_subspace_start,
     print_projection_initialization_message,
-    )
-from .CONSTANTS import NFUNCS, EXPAND_MASK_EPS
-from .initialization import atomic_block_minimal_basis, find_projected_minimal_basis_mask
+    warn_conflicting_initialization,
+)
+from .maskutil import (
+    init_smask,
+    linked_shell_idx,
+    mask_matrix,
+    mask_to_smask,
+    set_linked_shells,
+    smask_to_mask,
+)
+from .molutil import create_shell_separated_mol
 from .orbitalutil import get_occupied_orbitals
 
 
-def _validate_symmetry_aware_args(mol, symmetry_aware, irrep_nelec, get_smask, link_shells):
-    """find_subspace(symmetry_aware=True)'s upfront preconditions -- see
-    that argument's docstring for why each is required."""
+def _validate_symmetry_aware_args(
+        mol:            gto.Mole,
+        symmetry_aware: bool,
+        irrep_nelec:    dict | None,
+        get_smask:      bool,
+        link_shells:    bool,
+        ) -> None:
+    """Check `find_subspace(symmetry_aware=True)`'s upfront preconditions.
+
+    See that argument's docstring for why each is required.
+
+    Raises
+    ------
+    RuntimeError
+        If `symmetry_aware` is `True` and any precondition fails.
+    """
     if not symmetry_aware:
         return
     if not (mol.symmetry and mol.groupname != 'C1'):
@@ -48,20 +73,33 @@ def _validate_symmetry_aware_args(mol, symmetry_aware, irrep_nelec, get_smask, l
 
 
 def _initialize_mask(
-        mol, F, S, fullbasis_mol, verbose,
-        abd_initialization, initialize_by_projection,
-        spherical_average, abd_Q_tol,
-        ):
-    """Dispatch to one of find_subspace's three initial-mask strategies:
-    atomic block decomposition, STO-3G overlap projection, or (fallback)
-    the single AO with the smallest diagonal Fock element.
+        mol:                        gto.Mole,
+        F:                          np.ndarray,
+        S:                          np.ndarray,
+        fullbasis_mol:              gto.Mole,
+        verbose:                    bool,
+        abd_initialization:         bool,
+        initialize_by_projection:   bool,
+        spherical_average:          bool,
+        abd_Q_tol:                  float,
+        ) -> tuple[np.ndarray, np.ndarray]:
+    """Dispatch to one of `find_subspace`'s three initial-mask strategies.
 
-    Returns (mask, mask_init_idx).
+    In priority order: atomic block decomposition, STO-3G overlap
+    projection, or (fallback) the single AO with the smallest diagonal
+    Fock element.
+
+    Returns
+    -------
+    mask : ndarray
+        The initial AO mask.
+    mask_init_idx : ndarray
+        Indices selected by the initial mask.
     """
     if abd_initialization and initialize_by_projection:
         warn_conflicting_initialization()
 
-    is_restricted = len(F.shape) == 2
+    is_restricted = F.ndim == 2
     if is_restricted:
         Fii = np.diag(F)
     else:
@@ -89,8 +127,16 @@ def _initialize_mask(
     return mask, mask_init_idx
 
 
-def _orbital_history_entry(mask, e, orbsym, nocc, irrep_nelec, symmetry_aware, is_restricted):
-    """Build one find_subspace(track_orbitals=True) history entry."""
+def _orbital_history_entry(
+        mask:           np.ndarray,
+        e:              np.ndarray,
+        orbsym:         np.ndarray | None,
+        nocc:           tuple,
+        irrep_nelec:    dict | None,
+        symmetry_aware: bool,
+        is_restricted:  bool,
+        ) -> dict:
+    """Build one `find_subspace(track_orbitals=True)` history entry."""
     return {
         'nfunc': int(np.sum(mask)),
         'orbitals': get_occupied_orbitals(
@@ -100,130 +146,124 @@ def _orbital_history_entry(mask, e, orbsym, nocc, irrep_nelec, symmetry_aware, i
 
 
 def find_subspace(
-    F:                          np.ndarray,
-    S:                          np.ndarray,
-    mol:                        gto.Mole,
-    scf_obj:                    scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
-    conv_tol:                   float           = 1e-2,
-    verbose:                    bool            = True,
-    get_smask:                  bool            = False,
-    variant:                    str             = 'enocc',
-    link_shells:                bool            = True,
-    nfunc_normalisation:        bool            = True,
-    return_mask_history:        bool            = False,
-    abd_initialization:         bool            = False,
-    initialize_by_projection:   bool            = True,
-    spherical_average:          bool            = False,
-    abd_Q_tol:                  float           = .5,
-    symmetry_aware:             bool            = False,
-    irrep_nelec:                dict | None     = None,
-    track_orbitals:             bool            = False,
-    ) -> np.ndarray:
-    r"""Looks for a Fock matrix subspace that approximately solves the
-    Roothaan equation FC=SCE below a convergence of conv_tol.
+        F:                          np.ndarray,
+        S:                          np.ndarray,
+        mol:                        gto.Mole,
+        scf_obj:                    scf.hf.SCF | scf.hf.RHF | scf.uhf.UHF | scf.rohf.ROHF | scf.ghf.GHF,
+        conv_tol:                   float           = 1e-2,
+        verbose:                    bool            = True,
+        get_smask:                  bool            = False,
+        variant:                    str             = 'enocc',
+        link_shells:                bool            = True,
+        nfunc_normalisation:        bool            = True,
+        return_mask_history:        bool            = False,
+        abd_initialization:         bool            = False,
+        initialize_by_projection:   bool            = True,
+        spherical_average:          bool            = False,
+        abd_Q_tol:                  float           = .5,
+        symmetry_aware:             bool            = False,
+        irrep_nelec:                dict | None     = None,
+        track_orbitals:             bool            = False,
+        ) -> np.ndarray | list | tuple:
+    r"""Greedily grow an AO subspace that approximately solves FC = SCE.
 
-    Args:
-        F : ndarray
-            The full Fock matrix that will be sampled.
-        S : ndarray
-            The overlap matrix.
-        mol : Mole
-            The Mole molecule object
-        scf_obj : SCF
-            The SCF object corresponding to mol
-        conv_tol : float
-            Convergence criteria used to determine when to stop the
-            subspace iteration.
-        verbose : bool
-            Determines whether some output will be printed during
-            calculation.
-        get_smask : bool
-            Whether to return the shell mask and run iteration shell by
-            shell instead of function by function. May provide faster
-            convergence but can also provide more functions overall.
-        variant : str
-            Which variant to use. Specifies what will be the
-            minimisation criteria for adding a function/shell.
-            enocc: $\sum_{i}^{nocc}\epsilon_i$,
-               where $epsilon_i$ are the occupied diagonal Fock matrx
-               elements
-            ecore: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
-               where $h_{ii}=C_i^\dagger H_{core}C_i$
-            elden: $\Delta Q$,
-               which is $1-\frac{1}{nocc}\sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
-        link_shells : bool
-            Whether to link shells of atoms of same type in the mask.
-            Default is True.
-        nfunc_normalisation : bool
-            Whether to normalise the criteria with the number of added
-            functions.
-            Optional, deault is True
-        dft : bool
-            Hartree-Fock or DFT.
-            Optional, default is False
-        xc : str
-            XC functional string accepted by PySCF.
-            Optional, default is 'b3lyp'.
-        grid_level : int
-            predefined integration grid levels, 0-9 (0 very sparse, 9 very dense).
-            Optional, default is 3.
-        return_mask_history : bool
-            Whether to return the mask/smask at every iteration or only
-            the final converged one, default is False.
-        mask_cutoff : float
-            The ratio of toggled functions to all functions after which
-            subspace is considered converged. If None, conv_tol will be used,
-            if supplied conv_tol will be ignored.
-        abd_initialization : bool
-            Toggles atomic block decomposition minimal basis initialization
-            on. Optional, default is True.
-        spherical_average : bool
-            Whether ABD spherically averages the Fock matrix. Optional,
-            default is False.
-        abd_Q_tol : float
-            The atomic block decomposition charge tolerance, i.e. how much
-            of the charge of the molecule the minimal basis is allowed to
-            not account for. Optional, default 0.5.
-        symmetry_aware : bool
-            Optional feature, off by default. When True, the search
-            diagonalizes trial Fock matrices block-by-irrep and targets
-            `irrep_nelec`'s per-irrep occupation instead of the lowest N
-            eigenvalues overall (see expand_mask/symmetrized_eig). Requires
-            `mol.symmetry` truthy, `mol.groupname != 'C1'`, `irrep_nelec`
-            given, `get_smask=True` and `link_shells=True` -- a partial,
-            unlinked mask is not guaranteed to stay symmetry-closed, which
-            block-by-irrep diagonalization depends on. Default False:
-            behaviour is byte-identical to before this option existed.
-        irrep_nelec : dict | None
-            Target occupation per irrep name (pyscf mf.irrep_nelec format,
-            e.g. from scf_obj.get_irrep_nelec() on the converged reference
-            full-basis SCF). Required when `symmetry_aware=True`.
-        track_orbitals : bool
-            Optional feature, off by default. When True, records the
-            occupied orbital energies and their symmetry labels (via
-            get_occupied_orbitals) at every accepted ADB cycle -- the
-            initial mask and every subsequent growth step, mirroring
-            return_mask_history's per-step bookkeeping. Symmetry labels
-            are only meaningful (non-None) when `symmetry_aware=True`; with
-            it False they're still recorded, just with irrep=None
-            throughout. When True, the return value becomes a 2-tuple
-            `(result, orbital_history)` instead of just `result` --
-            existing call sites that assign the return value to a single
-            variable are unaffected as long as they leave this at its
-            default. `orbital_history` is a list of
-            `{'nfunc': int, 'orbitals': [(energy, irrep_label), ...]}`
-            dicts, one per recorded cycle, saveable via
-            write_orbital_history. Default False: behaviour/return shape
-            identical to before this option existed.
+    Starting from a minimal-basis seed, repeatedly adds the single
+    function or shell (see `get_smask`) that most improves `variant`'s
+    criterion, stopping once the improvement per step falls below
+    `conv_tol` or every function has been added.
 
-    Returns:
-        1D boolean ndarray. A mask with selected function indices set to
-        True. If collect_data is True, an ndarray is also returned with
-        data as described in Args section. Shell mask is returned
-        instead of function mask if get_smask is True. If
-        `track_orbitals=True`, a `(result, orbital_history)` tuple is
-        returned instead of just `result` -- see the `track_orbitals` Args
-        entry above.
+    Parameters
+    ----------
+    F : ndarray
+        The full Fock matrix that will be sampled.
+    S : ndarray
+        The overlap matrix.
+    mol : pyscf.gto.Mole
+        The molecule object.
+    scf_obj : pyscf.scf.hf.SCF
+        The SCF object corresponding to `mol`.
+    conv_tol : float, default 1e-2
+        Convergence criterion: the search stops once a step's criterion
+        improvement, normalized by the number of functions it added (see
+        `nfunc_normalisation`), falls below this.
+    verbose : bool, default True
+        Whether to print progress during the search.
+    get_smask : bool, default False
+        Whether to grow the subspace shell-by-shell (returning a shell
+        mask) instead of function-by-function. Shell-by-shell may converge
+        faster but can also add more functions overall.
+    variant : {'enocc', 'elden'}, default 'enocc'
+        Which criterion to minimize/maximize at each step -- see
+        `adb.calculations.get_iteration_criteria_value`:
+
+        - ``'enocc'``: :math:`\sum_i^{nocc} \epsilon_i`, the sum of the
+          occupied diagonal Fock matrix elements.
+        - ``'elden'``: :math:`\Delta Q`, the squared projection of the
+          full-basis occupied orbitals onto the subbasis.
+    link_shells : bool, default True
+        Whether to toggle shells of symmetry-equivalent atoms together.
+    nfunc_normalisation : bool, default True
+        Whether to normalize each step's criterion improvement by the
+        number of functions it added.
+    return_mask_history : bool, default False
+        Whether to return the mask/smask at every accepted step instead of
+        only the final one.
+    abd_initialization : bool, default False
+        Whether to seed the search with an atomic block decomposition
+        minimal basis (see `adb.atomic_block_minimal_basis`) instead of
+        `initialize_by_projection`'s STO-3G projection.
+    initialize_by_projection : bool, default True
+        Whether to seed the search with an STO-3G overlap projection (see
+        `adb.find_projected_minimal_basis_mask`). Ignored if
+        `abd_initialization` is `True` (a warning is raised if both are
+        requested).
+    spherical_average : bool, default False
+        Whether atomic block decomposition spherically averages the Fock
+        matrix. Only used when `abd_initialization` is `True`.
+    abd_Q_tol : float, default 0.5
+        Atomic block decomposition's charge tolerance -- how much of each
+        atom's charge the minimal basis is allowed to not account for.
+        Only used when `abd_initialization` is `True`.
+    symmetry_aware : bool, default False
+        Optional feature, off by default. When `True`, the search
+        diagonalizes trial Fock matrices block-by-irrep and targets
+        `irrep_nelec`'s per-irrep occupation instead of the lowest N
+        eigenvalues overall (see `expand_mask`/
+        `adb.calculations.symmetrized_eig`). Requires `mol.symmetry`
+        truthy, ``mol.groupname != 'C1'``, `irrep_nelec` given,
+        `get_smask=True` and `link_shells=True` -- a partial, unlinked mask
+        is not guaranteed to stay symmetry-closed, which block-by-irrep
+        diagonalization depends on. Default `False`: behaviour is
+        byte-identical to before this option existed.
+    irrep_nelec : dict, optional
+        Target occupation per irrep name (pyscf ``mf.irrep_nelec`` format,
+        e.g. from ``scf_obj.get_irrep_nelec()`` on the converged reference
+        full-basis SCF). Required when `symmetry_aware=True`.
+    track_orbitals : bool, default False
+        Optional feature, off by default. When `True`, records the
+        occupied orbital energies and their symmetry labels (via
+        `adb.get_occupied_orbitals`) at every accepted ADB cycle -- the
+        initial mask and every subsequent growth step, mirroring
+        `return_mask_history`'s per-step bookkeeping. Symmetry labels are
+        only meaningful (non-`None`) when `symmetry_aware=True`; with it
+        `False` they're still recorded, just with ``irrep=None``
+        throughout. When `True`, the return value becomes a 2-tuple
+        ``(result, orbital_history)`` instead of just `result` -- existing
+        call sites that assign the return value to a single variable are
+        unaffected as long as they leave this at its default.
+        `orbital_history` is a list of ``{'nfunc': int, 'orbitals':
+        [(energy, irrep_label), ...]}`` dicts, one per recorded cycle,
+        saveable via `adb.write_orbital_history`.
+
+    Returns
+    -------
+    ndarray or list
+        A 1D boolean mask with selected function indices set to `True`
+        (shell mask instead of function mask if `get_smask` is `True`), or
+        (if `return_mask_history=True`) a list of ``(mask, criterion,
+        difference)`` history entries. If `track_orbitals=True`, a
+        ``(result, orbital_history)`` tuple is returned instead of just
+        `result` -- see the `track_orbitals` parameter.
     """
     _validate_symmetry_aware_args(mol, symmetry_aware, irrep_nelec, get_smask, link_shells)
 
@@ -233,7 +273,7 @@ def find_subspace(
     fullbasis_mol = create_shell_separated_mol(mol)
 
     # mask or smask initialization
-    is_restricted = len(F.shape) == 2
+    is_restricted = F.ndim == 2
     mask, _ = _initialize_mask(
         mol, F, S, fullbasis_mol, verbose,
         abd_initialization, initialize_by_projection,
@@ -282,7 +322,6 @@ def find_subspace(
             0.0,
             dual_basis_initialization))
         basis_initialized = True
-        
 
     while not np.all(mask):
         mask, difference, current_criteria_val, n_added, smask = expand_mask(
@@ -314,24 +353,22 @@ def find_subspace(
             orbital_history.append(_orbital_history_entry(
                 mask, e_step, orbsym_step, nocc, irrep_nelec, symmetry_aware, is_restricted))
 
-        # If the dual basis does not span the minimal basis, skip collecting 
+        # If the dual basis does not span the minimal basis, skip collecting
         # the mask, resulting orbitals would not be even qualitatively correct
         if not basis_initialized:
             basis_initialized = np.sum(mask) >= np.max(nocc)
             continue
 
-        if  abs(n_added * difference) < conv_tol  or \
-            sum(mask) == len(mask):
+        if abs(n_added * difference) < conv_tol or sum(mask) == len(mask):
             break
 
         if return_mask_history:
             mask_history.append(
                 (copy.deepcopy(smask) if get_smask else copy.deepcopy(mask),
-                current_criteria_val,
-                difference))
+                 current_criteria_val,
+                 difference))
 
         previous_sum = current_criteria_val
-
 
     if get_smask:
         mask = smask
@@ -346,86 +383,96 @@ def find_subspace(
 
 
 def expand_mask(
-    F:                      np.ndarray,
-    S:                      np.ndarray,
-    nocc:                   tuple,
-    mask:                   np.ndarray,
-    smask:                  np.ndarray | None   = None,
-    variant:                str                 = 'enocc',
-    Cfull:                  np.ndarray | None   = None,
-    link_shells:            bool                = True,
-    nfunc_normalisation:    bool                = True,
-    mol:                    gto.Mole | None = None,
-    irrep_nelec:            dict | None         = None,
-    ) -> tuple[np.ndarray, float, float, int, np.ndarray | None]:
-    r"""Expands the current mask by either one function or one shell
-    based on smask.
+        F:                      np.ndarray,
+        S:                      np.ndarray,
+        nocc:                   tuple,
+        mask:                   np.ndarray,
+        smask:                  np.ndarray | None   = None,
+        variant:                str                 = 'enocc',
+        Cfull:                  np.ndarray | None   = None,
+        link_shells:            bool                = True,
+        nfunc_normalisation:    bool                = True,
+        mol:                    gto.Mole | None     = None,
+        irrep_nelec:            dict | None         = None,
+        ) -> tuple[np.ndarray, float, float, int, np.ndarray | None]:
+    r"""Expand `mask` by the single function or shell that most improves `variant`.
 
-    Args:
-        F : ndarray
-            Full Fock matrix
-        S : ndarray
-            Full overlap matrix
-        nocc : tuple
-            Number of occupied alpha and beta orbitals
-        mask : ndarray
-            The current mask. A logical 1d array
-        smask : None or ndarray
-            If None functions are tested individually. Else shell by
-            shell testing is used where shells are determined by the
-            smask array, where the elements represent the number of
-            functions per current shell. The shells are ordered in the
-            PySCF internal format
-        variant : str
-            Which variant to use. Specifies what will be the
-            minimisation criteria for adding a function/shell.
-            enocc: $\sum_{i}^{nocc}\epsilon_i$,
-               where $epsilon_i$ are the occupied diagonal Fock matrx
-               elements
-            ecore: $\frac{1}{2}\sum_{i}^{occ}(\epsilon_i+h_{ii})$,
-               where $h_{ii}=C_i^\dagger H_{core}C_i$
-            elden: $\Delta Q$,
-               which is $1-\frac{1}{nocc}
-                * \sum_{i,j}^{nocc}<i^{subbasis}|j^{fullbasis}>$
-        link_shells : bool
-            Whether to link shells of atoms of same type in the mask
-            Optional, default is True
-        nfunc_normalisation : bool
-            Whether to normalise the criteria with the number of added
-            functions.
-            Optional, deault is True
-        dft : bool
-            Hartree-Fock or DFT.
-            Optional, default is False
-        xc : str
-            XC functional string accepted by PySCF.
-            Optional, default is 'b3lyp'.
-        grid_level : int
-            predefined integration grid levels, 0-9
-            (0 very sparse, 9 very dense). Optional, default is 3.
-        mol : Mole | None
-            Optional. When given together with `irrep_nelec`, every trial
-            (and the current) masked Fock/overlap matrix is diagonalized
-            block-by-irrep (symmetrized_eig) instead of with the plain,
-            symmetry-blind adb.eig, and the 'enocc' criterion targets
-            `irrep_nelec`'s per-irrep occupation instead of the lowest N
-            eigenvalues overall. Requires `smask` (shell mode) and
-            `mol.symmetry` truthy. Must be the *shell-separated* mol whose
-            shells `smask`/`mask` index into (i.e. what find_subspace calls
-            `fullbasis_mol`, not necessarily its own `mol` argument) -- it
-            is passed straight to create_subbasis_mol to build each trial's
-            symmetry-adapted basis. Default None: behaviour is identical to
-            before this option existed.
-        irrep_nelec : dict | None
-            Optional. Target occupation per irrep name, pyscf
-            mf.irrep_nelec format. Must be given together with `mol`.
+    Tests every remaining (not-yet-selected) function or shell in turn,
+    diagonalizing the resulting trial masked (Fock, overlap) pair and
+    evaluating `variant`'s criterion, then commits whichever trial improves
+    the criterion the most (normalized by functions added, if
+    `nfunc_normalisation`).
 
-    Returns:
-        The new mask (boolean ndarray), the current difference in
-        eigenvalue sums and the current sum (energy sum of occupied
-        orbitals), the number of functions added (0 if no candidate was a
-        genuine improvement -- see EXPAND_MASK_EPS -- in which case mask/
-        smask are returned unchanged), shell mask if smask is provided.
+    Parameters
+    ----------
+    F : ndarray
+        Full Fock matrix.
+    S : ndarray
+        Full overlap matrix.
+    nocc : tuple
+        ``(n_alpha, n_beta)`` occupied counts.
+    mask : ndarray
+        The current AO mask.
+    smask : ndarray, optional
+        If `None`, functions are tested individually. Otherwise shell-by-
+        shell testing is used, with shells determined by `smask` (see
+        `adb.maskutil.init_smask`).
+    variant : {'enocc', 'elden'}, default 'enocc'
+        Which criterion to evaluate for each trial -- see
+        `adb.calculations.get_iteration_criteria_value`:
+
+        - ``'enocc'``: :math:`\sum_i^{nocc} \epsilon_i`, the sum of the
+          occupied diagonal Fock matrix elements.
+        - ``'elden'``: :math:`\Delta Q`, the squared projection of the
+          full-basis occupied orbitals onto the subbasis.
+    Cfull : ndarray, optional
+        Full-basis MO coefficients, required for `variant='elden'`
+        (computed internally if not given).
+    link_shells : bool, default True
+        Whether to test shells of symmetry-equivalent atoms as one
+        combined candidate rather than independently. Only used in shell
+        mode (`smask` given).
+    nfunc_normalisation : bool, default True
+        Whether to normalize each trial's criterion improvement by the
+        number of functions it would add.
+    mol : pyscf.gto.Mole, optional
+        When given together with `irrep_nelec`, every trial (and the
+        current) masked Fock/overlap matrix is diagonalized block-by-irrep
+        (`adb.calculations.symmetrized_eig`) instead of with the plain,
+        symmetry-blind `adb.eig`, and the ``'enocc'`` criterion targets
+        `irrep_nelec`'s per-irrep occupation instead of the lowest N
+        eigenvalues overall. Requires `smask` (shell mode) and
+        `mol.symmetry` truthy. Must be the *shell-separated* mol whose
+        shells `smask`/`mask` index into (i.e. what `find_subspace` calls
+        `fullbasis_mol`, not necessarily its own `mol` argument) -- it is
+        passed straight to `adb.create_subbasis_mol` to build each trial's
+        symmetry-adapted basis.
+    irrep_nelec : dict, optional
+        Target occupation per irrep name, pyscf ``mf.irrep_nelec`` format.
+        Must be given together with `mol`.
+
+    Returns
+    -------
+    mask : ndarray
+        The new mask (unchanged if no candidate improved the criterion --
+        see `n_added`).
+    difference : float
+        The current step's (possibly normalized) criterion improvement.
+        ``0.0`` if `n_added` is ``0``.
+    current_sum : float
+        The criterion value after this step (unnormalized).
+    n_added : int
+        Number of functions added. ``0`` if no remaining candidate was a
+        genuine improvement (see `adb.CONSTANTS.EXPAND_MASK_EPS`), in which
+        case `mask`/`smask` are returned unchanged.
+    smask : ndarray or None
+        The new shell mask, if `smask` was given.
+
+    Raises
+    ------
+    RuntimeError
+        If `mol`/`irrep_nelec` (symmetry-aware mode) are given without
+        `smask` (shell mode).
     """
     symmetry_aware = mol is not None and irrep_nelec is not None
     if symmetry_aware and smask is None:
@@ -444,7 +491,6 @@ def expand_mask(
     maskedF = mask_matrix(F, mask)
     maskedS = mask_matrix(S, mask)
     (evals, coeffs), orbsym = _eig(maskedF, maskedS, smask)
-    last_sum = 0.0
     if Cfull is None and variant == 'elden':
         _, Cfull = eig(F, S)
     last_sum = get_iteration_criteria_value(
@@ -465,12 +511,12 @@ def expand_mask(
             evals, coeffs = eig(maskedF, maskedS)
 
             test_sums.append(
-                (i, 
-                get_iteration_criteria_value(
-                    variant, epsilon_i=evals, nocc=nocc,
-                    Csub=coeffs, Cfull=Cfull,
-                    ovlp=S[:, test_mask]),
-                1))
+                (i,
+                 get_iteration_criteria_value(
+                     variant, epsilon_i=evals, nocc=nocc,
+                     Csub=coeffs, Cfull=Cfull,
+                     ovlp=S[:, test_mask]),
+                 1))
     else:
         # Gather indices of duplicate shells if link_shells enabled
         # ( if system has more than 1 atom of same type, shells will be
@@ -494,15 +540,15 @@ def expand_mask(
             maskedS = mask_matrix(S, test_mask)
             (evals, coeffs), test_orbsym = _eig(maskedF, maskedS, test_smask)
 
-            func_keys = [shell[3] for shell in submask[:,3]]
+            func_keys = [shell[3] for shell in submask[:, 3]]
             nfuncs = np.sum(itemgetter(*func_keys)(NFUNCS))
             test_sums.append(
                 (i,
-                get_iteration_criteria_value(
-                    variant, epsilon_i=evals, nocc=nocc, Csub=coeffs,
-                    Cfull=Cfull, ovlp=S[:, test_mask],
-                    irrep_nelec=irrep_nelec, orbsym=test_orbsym),
-                nfuncs))
+                 get_iteration_criteria_value(
+                     variant, epsilon_i=evals, nocc=nocc, Csub=coeffs,
+                     Cfull=Cfull, ovlp=S[:, test_mask],
+                     irrep_nelec=irrep_nelec, orbsym=test_orbsym),
+                 nfuncs))
 
     if nfunc_normalisation:
         test_differences = [(test_sum[1] - last_sum) / test_sum[2] for test_sum in test_sums]

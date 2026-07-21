@@ -1,41 +1,66 @@
-from pyscf.gto import Mole
-from .basisutil import get_uncontracted_basis, extract_basis
-import numpy
-from pyscf.gto.mole import format_atom
-from pyscf.gto.basis import load_ecp
+from copy import deepcopy
 
-def create_shell_separated_mol(
-        mol:        Mole,
-        verbose:    int           = 0) -> Mole:
-    """Creates a copy of mol with shells separated."""
+import numpy as np
+from pyscf.gto import Mole
+from pyscf.gto.basis import load_ecp
+from pyscf.gto.mole import format_atom
+
+from .basisutil import extract_basis, get_uncontracted_basis
+
+
+def create_shell_separated_mol(mol: Mole, verbose: int = 0) -> Mole:
+    """Build a copy of `mol` with every contraction split into its own shell.
+
+    Uses `adb.basisutil.get_uncontracted_basis` to unravel `mol`'s basis,
+    so the returned mol's ``_bas``/shell mask are in 1:1 correspondence
+    with individual contractions -- the representation `adb`'s shell
+    masks (`init_smask` etc.) operate on.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Molecule object to shell-separate.
+    verbose : int, default 0
+        Verbosity passed to the new `Mole`.
+
+    Returns
+    -------
+    pyscf.gto.Mole
+        The shell-separated copy, built and ready to use.
+    """
     shell_sep_basis = get_uncontracted_basis(mol)
-    cmol = Mole(
+    return Mole(
         atom=mol.atom, basis=shell_sep_basis,
         charge=mol.charge, spin=mol.spin,
         unit=mol.unit, symmetry=mol.symmetry,
         ecp=mol.ecp,
         verbose=verbose).build()
-    return cmol
 
 
-def get_shells(mol: Mole) -> numpy.ndarray:
-    """Get the shell structure of mol object.
+def get_shells(mol: Mole) -> np.ndarray:
+    """Number of AO functions per shell, in pyscf's internal shell order.
 
-    Args:
-        mol : pyscf.gto.Mole
-            The molecule object.
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Molecule object.
 
-    Returns:
-        A 1D ndarray with the number of functions per shell as elements.
-        Shells are ordered in the pyscf internal format.
+    Returns
+    -------
+    ndarray, dtype=int
+        Number of functions per shell.
+
+    Raises
+    ------
+    Exception
+        If the shell function counts don't sum to `mol.nao_nr()`.
     """
-    shells = numpy.array([], dtype=int)  # Number of functions per shell
+    shells = np.array([], dtype=int)
 
-    for ib in range(mol.nbas):  # nbas = number of shells (basis fcts)
-        angl = mol.bas_angular(ib)  # angular momentum l of given basis function
-        nc = mol.bas_nctr(ib)  # number of CGTOs for given shell
-
-        shells = numpy.append(
+    for ib in range(mol.nbas):
+        angl = mol.bas_angular(ib)
+        nc = mol.bas_nctr(ib)
+        shells = np.append(
             shells, nc * (angl + 1) * (angl + 2) // 2 if mol.cart else nc * (2 * angl + 1)
         )
 
@@ -47,35 +72,74 @@ def get_shells(mol: Mole) -> numpy.ndarray:
     return shells
 
 
-def basis_functions_per_atom(mol: Mole) -> numpy.ndarray:
+def basis_functions_per_atom(mol: Mole) -> np.ndarray:
+    """Number of AO functions on each atom of `mol`.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Molecule object.
+
+    Returns
+    -------
+    ndarray, dtype=int, shape (natm,)
+        Number of functions per atom, in atom order.
+    """
     basis_struct = mol._bas
     atoms = mol._atom
-    nat = len(atoms)
-    func_per_atom = numpy.zeros(nat, dtype=int)
-    for i in range(nat):
-        angl = basis_struct[basis_struct[:,0]==i][:,1]
-        numc = basis_struct[basis_struct[:,0]==i][:,3] # Number of CGTOs
-        func_per_atom[i] = numpy.sum((2*angl+1) * numc) if not mol.cart \
-                           else numpy.sum((angl + 1)*(angl + 2) // 2 * numc)
-    
+    func_per_atom = np.zeros(len(atoms), dtype=int)
+    for i in range(len(atoms)):
+        angl = basis_struct[basis_struct[:, 0] == i][:, 1]
+        numc = basis_struct[basis_struct[:, 0] == i][:, 3]
+        func_per_atom[i] = np.sum((2 * angl + 1) * numc) if not mol.cart \
+            else np.sum((angl + 1) * (angl + 2) // 2 * numc)
+
     return func_per_atom
 
 
-def create_mol_from_file(fn: str, basis_set: str, charge=0, 
-                         spin=0, unit="Angstrom", symmetry=False,
-                         **kwargs) -> Mole:
-    asymbs = list(set([atom[0] for atom in format_atom(fn)]))
+def create_mol_from_file(
+        fn:         str,
+        basis_set:  str,
+        charge:     int             = 0,
+        spin:       int             = 0,
+        unit:       str             = "Angstrom",
+        symmetry:   bool | str      = False,
+        **kwargs,
+        ) -> Mole:
+    """Build a `Mole` from a geometry file, auto-attaching ECPs where available.
 
-    # If ECPs are present, set the ECP basis dictionary, else None
+    Parameters
+    ----------
+    fn : str
+        Path to a geometry file (any format `pyscf.gto.mole.format_atom`
+        accepts, e.g. XYZ).
+    basis_set : str
+        Basis set name, looked up per element (and, via
+        `pyscf.gto.basis.load_ecp`, for a matching ECP).
+    charge : int, default 0
+        Molecular charge.
+    spin : int, default 0
+        Number of unpaired electrons (pyscf's ``2S`` convention).
+    unit : str, default "Angstrom"
+        Coordinate unit.
+    symmetry : bool or str, default False
+        Passed straight to `Mole(symmetry=...)`.
+    **kwargs
+        Additional keyword arguments forwarded to `Mole`.
+
+    Returns
+    -------
+    pyscf.gto.Mole
+        The built molecule.
+    """
+    asymbs = list(set(atom[0] for atom in format_atom(fn)))
+
     ecp_bs = {}
     for asymb in asymbs:
         ecp = load_ecp(basis_set, asymb)
-        if not ecp:
-            continue
-        ecp_bs[asymb] = ecp
-    # If only None in ecp dict, set object to None so
-    # pyscf interprets it correctly
-    ecp_bs = None if not ecp_bs else ecp_bs
+        if ecp:
+            ecp_bs[asymb] = ecp
+    ecp_bs = ecp_bs or None
 
     mol = Mole(
         atom=fn,
@@ -88,42 +152,81 @@ def create_mol_from_file(fn: str, basis_set: str, charge=0,
         verbose=0,
         **kwargs
     )
-    mol = mol.build()
-
-    return mol
+    return mol.build()
 
 
 def create_mol_from_template(template: Mole, **kwargs) -> Mole:
-    from copy import deepcopy
+    """Copy `template` and rebuild it with the given attributes overridden.
 
+    Parameters
+    ----------
+    template : pyscf.gto.Mole
+        Molecule to copy (deep-copied; `template` itself is untouched).
+    **kwargs
+        Attribute names and values to set on the copy before rebuilding,
+        e.g. ``basis='sto3g'``.
+
+    Returns
+    -------
+    pyscf.gto.Mole
+        The rebuilt copy.
+
+    Raises
+    ------
+    RuntimeError
+        If `template` has no such attribute.
+    """
     mol = deepcopy(template)
-    for key,val in kwargs.items():
+    for key, val in kwargs.items():
         if not hasattr(mol, key):
             raise RuntimeError(f"Molecule object does not have attribute {key}")
         setattr(mol, key, val)
-    mol = mol.build()
-
-    return mol
+    return mol.build()
 
 
-def create_subbasis_mol(
-        mol:        Mole,
-        smask:      numpy.ndarray    ) -> Mole:
+def create_subbasis_mol(mol: Mole, smask: np.ndarray) -> Mole:
+    """Build the `Mole` described by a shell mask.
 
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Full-basis molecule the subbasis is drawn from.
+    smask : ndarray
+        Shell mask (see `adb.maskutil.init_smask`) indexing into `mol`'s
+        shell-separated basis.
+
+    Returns
+    -------
+    pyscf.gto.Mole
+        The built subbasis molecule.
+    """
     extracted_basis, ecp_bas = extract_basis(smask, create_shell_separated_mol(mol))
     subbasis_mol = Mole(
-        atom = mol.atom, basis = extracted_basis,
-        charge = mol.charge, spin = mol.spin,
-        verbose = mol.verbose, unit = mol.unit,
-        ecp = ecp_bas, symmetry = mol.symmetry
+        atom=mol.atom, basis=extracted_basis,
+        charge=mol.charge, spin=mol.spin,
+        verbose=mol.verbose, unit=mol.unit,
+        ecp=ecp_bas, symmetry=mol.symmetry
     )
     subbasis_mol.build()
 
     return subbasis_mol
 
 
-def get_array_of_angular_momenta_and_atom_id(mol):
-    angls_aid = numpy.zeros((mol.nao_nr(), 2), dtype=int)
+def get_array_of_angular_momenta_and_atom_id(mol: Mole) -> np.ndarray:
+    """Per-AO angular momentum and owning atom id.
+
+    Parameters
+    ----------
+    mol : pyscf.gto.Mole
+        Molecule object.
+
+    Returns
+    -------
+    ndarray, dtype=int, shape (nao, 2)
+        Column 0 is each AO's angular momentum `l`; column 1 is its atom
+        id. Row `n` describes the `n`-th AO in `mol`'s internal order.
+    """
+    angls_aid = np.zeros((mol.nao_nr(), 2), dtype=int)
     input_idx = 0
     for bas in mol._bas:
         nfuncs = funcs_on_shell(bas[1], mol.cart) * bas[3]
@@ -133,6 +236,20 @@ def get_array_of_angular_momenta_and_atom_id(mol):
     return angls_aid
 
 
-def funcs_on_shell(angl, cart=False):
-    # Floor division to output an integer
+def funcs_on_shell(angl: int, cart: bool = False) -> int:
+    """Number of AO functions in one shell of angular momentum `angl`.
+
+    Parameters
+    ----------
+    angl : int
+        Angular momentum quantum number (0=S, 1=P, ...).
+    cart : bool, default False
+        Whether to count Cartesian (rather than spherical) functions.
+
+    Returns
+    -------
+    int
+        ``(angl + 1) * (angl + 2) // 2`` Cartesian functions, or
+        ``2 * angl + 1`` spherical functions.
+    """
     return (angl + 1) * (angl + 2) // 2 if cart else 2 * angl + 1

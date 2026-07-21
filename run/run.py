@@ -24,19 +24,6 @@ AVAIL_INIT_METHODS = [
     'vsap'
 ]
 
-def get_files_in_folder(folder: str):
-    """Get all files in folder.
-
-    Args:
-        folder : str
-            The folder to search for files in.
-
-    Returns:
-        List of files in the folder.
-    """
-    files = os.listdir(folder)
-    return files
-
 
 def add_initial_guesses(ig_list, mol_list):
     if mol_list is None:
@@ -45,6 +32,29 @@ def add_initial_guesses(ig_list, mol_list):
         mol_list.extend(ig_list)
 
     return mol_list
+
+
+def get_initial_fock_matrix(init_method, scf_method_object, sap_basis=None, xc=None):
+    fock = None
+    match init_method.lower():
+        case "scf":
+            if not scf_method_object.converged:
+                raise RuntimeError("Trying to initialize with a converged Fock matrix from an unconverged calculation!")
+            dm0 = None
+        case "vsap":
+            if xc is None:
+                raise RuntimeError("Exchange correlation functional is None!")
+            dm0 = scf_method_object.mol.KS().set(xc=xc).get_init_guess(key=init_method)
+        case "sap":
+            if sap_basis is None:
+                raise RuntimeError("SAP basis is None! Must be either Pyscf built-in or path to external file!")
+            scf_method_object.sap_basis = sap_basis
+            dm0 = scf_method_object.get_init_guess(key=init_method)
+        case _:
+            dm0 = scf_method_object.get_init_guess(key=init_method)
+
+    fock = scf_method_object.get_fock(dm=dm0)
+    return fock
 
 
 def run_abs(
@@ -123,67 +133,72 @@ def run_abs(
         
         # Set up Hartree-Fock, remove linear dependencies from basis
         if is_restricted:
-            myhf = mol.RHF()
+            scf_method_object = mol.RHF()
         else:
-            myhf = mol.UHF()
+            scf_method_object = mol.UHF()
         if dft:
             if is_restricted:
-                myhf = mol.RKS()
+                scf_method_object = mol.RKS()
             else:
-                myhf = mol.UKS()
-            myhf.xc = xc
-            myhf.grids.level = grid_level
-            myhf.grids.prune = None
-        myhf = myhf.apply(scf.addons.remove_linear_dep_)
-        # myhf.eig = adb.eigh
-
+                scf_method_object = mol.UKS()
+            scf_method_object.xc = xc
+            scf_method_object.grids.level = grid_level
+            scf_method_object.grids.prune = None
+        scf_method_object = scf_method_object.apply(scf.addons.remove_linear_dep_)
 
         start = time()
         # Set the symmetry occupations if present
         if irrep_nelec is not None:
-            myhf.irrep_nelec = {}
+            scf_method_object.irrep_nelec = {}
             for key in irrep_nelec:
                 if irrep_nelec[key] != 0:
-                    if key not in myhf.mol.irrep_name:
-                        raise RuntimeError(f'irrep {key} not found in subbasis:\n{myhf.mol.irrep_name}')
-                    myhf.irrep_nelec[key] = irrep_nelec[key]
+                    if key not in scf_method_object.mol.irrep_name:
+                        raise RuntimeError(f'irrep {key} not found in subbasis:\n{scf_method_object.mol.irrep_name}')
+                    scf_method_object.irrep_nelec[key] = irrep_nelec[key]
         else:
             print('Symmetry occupations not set explicitly for the full basis calculation!', file=sys.stderr)
 
-        if debug: myhf.verbose = 4
+        if debug: scf_method_object.verbose = 4
 
         # Using level_shift, do a few first order SCF cycles
-        myhf.init_guess = 'atom'
-        myhf.level_shift = 1.0
-        myhf.max_cycle = 3
-        myhf.kernel()
+        scf_method_object.init_guess = 'atom'
+        scf_method_object.level_shift = 1.0
+        scf_method_object.max_cycle = 3
+        scf_method_object.kernel()
 
         # Restore default parameters and switch to second order CIAH.
-        # Use adb.symmetry_safe_newton rather than .newton() directly: with
-        # mol.symmetry enabled and a large/diffuse basis where
-        # remove_linear_dep_ (above) actually drops linearly-dependent AO
-        # combinations, plain pyscf .newton() crashes -- see
-        # adb/scf_fixes.py for the root cause and fix.
-        myhf = adb.symmetry_safe_newton(myhf)
-        myhf.level_shift = 0.0
-        myhf.max_cycle = 50
-        myhf.kernel()
+        # The coarse level-shifted warmup above only approximately respects
+        # mol's point-group symmetry -- Newton's orbital-rotation step
+        # labels orbital symmetry at every micro-iteration with a strict
+        # (1e-9) tolerance, so hand it an explicitly symmetrized MO space
+        # rather than relying on the warmup having converged that cleanly.
+        mo_coeff_sym = scf_method_object.mo_coeff
+        if mol.symmetry and mol.groupname != 'C1':
+            if is_restricted:
+                mo_coeff_sym = pyscf.symm.symmetrize_space(mol, scf_method_object.mo_coeff)
+            else:
+                mo_coeff_sym = [
+                    pyscf.symm.symmetrize_space(mol, scf_method_object.mo_coeff[0]),
+                    pyscf.symm.symmetrize_space(mol, scf_method_object.mo_coeff[1]),
+                ]
+        scf_method_object = adb.symmetry_safe_newton(scf_method_object)
+        scf_method_object.level_shift = 0.0
+        scf_method_object.max_cycle = 50
+        scf_method_object.kernel(mo_coeff_sym, scf_method_object.mo_occ)
 
         end = time()
-        e_tot = myhf.e_tot
+        e_tot = scf_method_object.e_tot
 
         fullbasis_hf_time = end - start
-        F_scf = myhf.get_fock()
+        F_scf = scf_method_object.get_fock()
 
         if not mol.symmetry or mol.groupname == 'C1':
             irrep_nelec = None
         else:
-            irrep_nelec = myhf.get_irrep_nelec()
+            irrep_nelec = scf_method_object.get_irrep_nelec()
 
         # Save the SCF matrices
-        mo_coeff_scf = copy.deepcopy(myhf.mo_coeff)
-        mo_energy_scf = copy.deepcopy(myhf.mo_energy)
-        mo_occ_scf = copy.deepcopy(myhf.mo_occ)
+        mo_coeff_scf = copy.deepcopy(scf_method_object.mo_coeff)
 
         for ig in init_guess:
             print(f'Running calculation for mol {molfilename}, with basis {basisname} and init guess {ig}')
@@ -214,22 +229,12 @@ def run_abs(
                     f.write(f"{charge:<15d} {spin:<15d}\n")
                     f.write(f"Calculations done on {datetime.datetime.now()}\n\n")
 
-                    dm0=None
                     start = time()
                     # Based on the initial guess, get the Fock matrix which
                     # is used as the initial guess in the subbasis
-                    if ig == 'scf':
-                        F = F_scf
-                    else:
-                        if ig == 'vsap':
-                            tempmf = mol.KS().set(xc=xc)
-                            dm0 = tempmf.get_init_guess(key='vsap')
-                        else:
-                            myhf.sap_basis = sapbs
-                            dm0 = myhf.get_init_guess(key=ig)
-                        F = myhf.get_fock(dm=dm0)
+                    F = get_initial_fock_matrix(ig, scf_method_object, sap_basis=sapbs, xc=xc)
                     end = time()
-                    S = myhf.get_ovlp()
+                    S = scf_method_object.get_ovlp()
 
                     f.write("time stats [s]\n")
                     f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
@@ -238,7 +243,7 @@ def run_abs(
                     if variant == 'enocc':
                         start = time()
                         # maskhistory = adb.find_subspace(
-                        #     F, S, mol, myhf,
+                        #     F, S, mol, scf_method_object,
                         #     conv_tol=conv_tol,
                         #     variant=variant,
                         #     return_mask_history=True,
@@ -246,7 +251,7 @@ def run_abs(
                         #     abd_initialization=abd_init
                         # )
                         # data_fbyf = adb.mask_analysis(
-                        #     maskhistory, mol, myhf,
+                        #     maskhistory, mol, scf_method_object,
                         #     F, S
                         # )
                         end = time()
@@ -264,7 +269,7 @@ def run_abs(
                             irrep_nelec=irrep_nelec,
                         )
                     find_subspace_result = adb.find_subspace(
-                        F, S, mol, myhf,
+                        F, S, mol, scf_method_object,
                         conv_tol=conv_tol,
                         get_smask=True,
                         variant=variant,
@@ -284,7 +289,7 @@ def run_abs(
                     else:
                         smaskhistory = find_subspace_result
                     mask_analysis_result = adb.mask_analysis(
-                        smaskhistory, shellsep_mol, myhf,
+                        smaskhistory, shellsep_mol, scf_method_object,
                         F, S, dft = dft, xc = xc, grid_level = grid_level,
                         C_full = mo_coeff_scf,
                         calculate_correction = calculate_DB_correction,
@@ -323,50 +328,6 @@ def run_abs(
                     f.write("shell-by-shell iteration\n")
                     df_sbys.to_csv(f, index=False)
                     f.write("\n\n")
-
-
-def print_labels_of_functions_in_mask(mask, mol):
-    atom_dict = adb.ioutil.function_labels_from_mask(mask, mol)
-
-    print('\n\nFunctions in the pseudominimal basis:')
-    for key, elem in atom_dict.items():
-        print(f'{key}: {elem}')
-    print()
-    print()
-
-
-def find_pseudominimal_basis_mask(
-        mol,
-        F,
-        S,
-        init_guess   : str  = 'atom',
-        sap_basis    : str  = 'sapgraspsmall',
-        sph_avg_fock : bool = False,
-        run_dft      : bool = False,
-        xcfunc       : str  = 'pbe,pbe'
-    ):
-
-    grid_level = 7
-    mf = dft.KS(mol) if run_dft else scf.HF(mol)
-    if run_dft:
-        mf.grids.level = grid_level
-        mf.xc = xcfunc
-        mf.grids.prune = None
-    
-    # Initialize init guess method
-    mf.init_guess = init_guess
-    if init_guess == 'sap':
-        mf.sap_basis = sap_basis
-    dm0 = mf.get_init_guess(key=init_guess)
-    # we need the corresponding Fock matrix
-    F = mf.get_fock(dm=dm0)
-    S = mf.get_ovlp()
-    # Find minimal basis using atomic block decomposition
-    return adb.atomic_block_minimal_basis(
-        mol, F, S, Q_tol=q_tol, by_shell=True,
-        get_mask_history=False, verbose=False,
-        spherically_average_fock=sph_avg_fock,
-    )
 
 
 def _append_criterion_result(output_file, row):
@@ -438,38 +399,40 @@ def compute_fullbasis_criterion(
         nocc = mol.nelec
 
         if mol.spin == 0:
-            myhf = mol.RHF()
+            scf_method_object = mol.RHF()
         else:
-            myhf = mol.UHF()
+            scf_method_object = mol.UHF()
         if dft:
             if mol.spin == 0:
-                myhf = mol.RKS()
+                scf_method_object = mol.RKS()
             else:
-                myhf = mol.UKS()
-            myhf.xc = xc
-            myhf.grids.level = grid_level
-            myhf.grids.prune = None
-        myhf = myhf.apply(scf.addons.remove_linear_dep_)
+                scf_method_object = mol.UKS()
+            scf_method_object.xc = xc
+            scf_method_object.grids.level = grid_level
+            scf_method_object.grids.prune = None
+        scf_method_object.remove_overlap_zero_eigenvalue = True
+        scf_method_object.overlap_zero_eigenvalue_threshold = 1e-6
+        # scf_method_object = scf_method_object.apply(scf.addons.remove_linear_dep_)
 
-        S = myhf.get_ovlp()
+        S = scf_method_object.get_ovlp()
 
         if ig_list is None:
             ig_list = ['atom']
 
         F_scf = None
         if 'scf' in ig_list:
-            myhf.init_guess = 'atom'
-            myhf.level_shift = 1.0
-            myhf.max_cycle = 3
-            myhf.kernel()
+            scf_method_object.init_guess = 'atom'
+            scf_method_object.level_shift = 1.0
+            scf_method_object.max_cycle = 3
+            scf_method_object.kernel()
             # See adb/scf_fixes.py: plain .newton() crashes when
             # mol.symmetry is enabled and remove_linear_dep_ (above) has
             # actually reduced the basis.
-            myhf = adb.symmetry_safe_newton(myhf)
-            myhf.level_shift = 0.0
-            myhf.max_cycle = 50
-            myhf.kernel()
-            F_scf = myhf.get_fock()
+            scf_method_object = adb.symmetry_safe_newton(scf_method_object)
+            scf_method_object.level_shift = 0.0
+            scf_method_object.max_cycle = 50
+            scf_method_object.kernel()
+            F_scf = scf_method_object.get_fock()
 
         for ig in ig_list:
             if ig == 'sap':
@@ -483,11 +446,11 @@ def compute_fullbasis_criterion(
                 elif ig == 'vsap':
                     tempmf = mol.KS().set(xc=xc)
                     dm0 = tempmf.get_init_guess(key='vsap')
-                    F = myhf.get_fock(dm=dm0)
+                    F = scf_method_object.get_fock(dm=dm0)
                 else:
-                    myhf.sap_basis = sapbs
-                    dm0 = myhf.get_init_guess(key=ig)
-                    F = myhf.get_fock(dm=dm0)
+                    scf_method_object.sap_basis = sapbs
+                    dm0 = scf_method_object.get_init_guess(key=ig)
+                    F = scf_method_object.get_fock(dm=dm0)
 
                 evals, evecs = adb.eig(F, S)
                 criterion_value = adb.get_iteration_criteria_value(
