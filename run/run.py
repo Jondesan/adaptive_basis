@@ -144,7 +144,8 @@ def run_abs(
             scf_method_object.xc = xc
             scf_method_object.grids.level = grid_level
             scf_method_object.grids.prune = None
-        scf_method_object = scf_method_object.apply(scf.addons.remove_linear_dep_)
+        scf_method_object.remove_overlap_zero_eigenvalue = True
+        scf_method_object.overlap_zero_eigenvalue_threshold = 1e-6
 
         start = time()
         # Set the symmetry occupations if present
@@ -412,7 +413,6 @@ def compute_fullbasis_criterion(
             scf_method_object.grids.prune = None
         scf_method_object.remove_overlap_zero_eigenvalue = True
         scf_method_object.overlap_zero_eigenvalue_threshold = 1e-6
-        # scf_method_object = scf_method_object.apply(scf.addons.remove_linear_dep_)
 
         S = scf_method_object.get_ovlp()
 
