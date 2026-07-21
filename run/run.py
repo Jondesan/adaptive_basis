@@ -24,19 +24,6 @@ AVAIL_INIT_METHODS = [
     'vsap'
 ]
 
-def get_files_in_folder(folder: str):
-    """Get all files in folder.
-
-    Args:
-        folder : str
-            The folder to search for files in.
-
-    Returns:
-        List of files in the folder.
-    """
-    files = os.listdir(folder)
-    return files
-
 
 def add_initial_guesses(ig_list, mol_list):
     if mol_list is None:
@@ -332,50 +319,6 @@ def run_abs(
                     f.write("shell-by-shell iteration\n")
                     df_sbys.to_csv(f, index=False)
                     f.write("\n\n")
-
-
-def print_labels_of_functions_in_mask(mask, mol):
-    atom_dict = adb.ioutil.function_labels_from_mask(mask, mol)
-
-    print('\n\nFunctions in the pseudominimal basis:')
-    for key, elem in atom_dict.items():
-        print(f'{key}: {elem}')
-    print()
-    print()
-
-
-def find_pseudominimal_basis_mask(
-        mol,
-        F,
-        S,
-        init_guess   : str  = 'atom',
-        sap_basis    : str  = 'sapgraspsmall',
-        sph_avg_fock : bool = False,
-        run_dft      : bool = False,
-        xcfunc       : str  = 'pbe,pbe'
-    ):
-
-    grid_level = 7
-    mf = dft.KS(mol) if run_dft else scf.HF(mol)
-    if run_dft:
-        mf.grids.level = grid_level
-        mf.xc = xcfunc
-        mf.grids.prune = None
-    
-    # Initialize init guess method
-    mf.init_guess = init_guess
-    if init_guess == 'sap':
-        mf.sap_basis = sap_basis
-    dm0 = mf.get_init_guess(key=init_guess)
-    # we need the corresponding Fock matrix
-    F = mf.get_fock(dm=dm0)
-    S = mf.get_ovlp()
-    # Find minimal basis using atomic block decomposition
-    return adb.atomic_block_minimal_basis(
-        mol, F, S, Q_tol=q_tol, by_shell=True,
-        get_mask_history=False, verbose=False,
-        spherically_average_fock=sph_avg_fock,
-    )
 
 
 def _append_criterion_result(output_file, row):
