@@ -125,14 +125,6 @@ def atomic_block_minimal_basis(
                     mask_matrix(S_atom.copy(), mask_atom)
                     )
 
-                # if get_mask_history:
-                #     # set Pat_i and Pat_j in the full mask to True in
-                #     # the current atom block
-                #     full_mask[func_offset + Pat_i] = True
-                #     full_mask[func_offset + Pat_j] = True
-                #     full_smask = mask_to_smask(full_mask, smask.copy(), mol.cart)
-                #     mask_history.append(copy.deepcopy(full_smask))
-
                 # set elements i,j and j,i of P_atom to zero
                 P_atom[mask_atom, :] = 0
                 P_atom[:, mask_atom] = 0
@@ -202,7 +194,6 @@ def find_projected_minimal_basis_mask(
             x[3] * funcs_on_shell(x[1], mol.cart)
             for x in mol._bas if x[0] == atom_id and x[1] < angl
         )
-        # angls_atom = [x[1] for x in list(filter(lambda x: x[0] == atom_id and x[1] < angl, mol._bas))]
 
         # This guarantees no function will be chosen twice by removing already
         # selected functions from the pool of available ones
