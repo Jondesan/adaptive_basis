@@ -39,11 +39,10 @@ def eig(h: np.ndarray, s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
 def canonical_orth(h: np.ndarray, s: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Solve a generalized eigenproblem by canonical orthogonalization.
 
-    Robust to a near-singular (but not decorated with
-    ``scf.addons.remove_linear_dep_``) overlap matrix `s`, which is common
-    for the masked sub-Fock/sub-overlap matrices this is used on -- unlike
-    a plain `scipy.linalg.eigh(h, s)` call, small overlap eigenvalues are
-    dropped rather than amplified.
+    Robust to a near-singular (but not decorated with) overlap matrix `s`,
+    which is common for the masked sub-Fock/sub-overlap matrices this
+    is used on -- unlike a plain `scipy.linalg.eigh(h, s)` call, small
+    overlap eigenvalues are dropped rather than amplified.
 
     Parameters
     ----------

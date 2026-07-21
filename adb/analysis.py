@@ -28,6 +28,7 @@ from .maskutil import (
 )
 from .molutil import create_shell_separated_mol
 from .orbitalutil import get_occupied_orbitals_from_scf
+from .scf_fixes import symmetry_safe_newton
 
 
 def _split_init_and_growth_history(mask_history: list) -> tuple[list, list]:
@@ -275,7 +276,8 @@ def _run_subbasis_scf(
         submf.xc = xc
         submf.grids.level = grid_level
         submf.grids.prune = None
-    submf = submf.apply(scf.addons.remove_linear_dep_)
+    submf.remove_overlap_zero_eigenvalue = True
+    submf.overlap_zero_eigenvalue_threshold = 1e-6
 
     # SCF initial guess by projecting the density from
     # full basis to current basis
@@ -311,9 +313,12 @@ def _run_subbasis_scf(
     submf.max_cycle = 3
     submf.kernel(dm0=dm0_init)
 
-    # Use the level shift calculation density as initial guess
-    # Restore default parameters and switch to second order CIAH
-    submf = submf.newton()
+    # Use the level shift calulcation density as initial guess
+    # Restore default parameters and switch to second order CIAH.
+    # symmetry_safe_newton rather than .newton(): with mol.symmetry enabled
+    # and linear dependencies removed (above) actually reducing the basis,
+    # plain pyscf .newton() crashes -- see adb/scf_fixes.py for why.
+    submf = symmetry_safe_newton(submf)
     submf.level_shift = 0.0
     submf.max_cycle = 50
     submf.kernel()

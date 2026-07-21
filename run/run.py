@@ -144,7 +144,8 @@ def run_abs(
             scf_method_object.xc = xc
             scf_method_object.grids.level = grid_level
             scf_method_object.grids.prune = None
-        scf_method_object = scf_method_object.apply(scf.addons.remove_linear_dep_)
+        scf_method_object.remove_overlap_zero_eigenvalue = True
+        scf_method_object.overlap_zero_eigenvalue_threshold = 1e-6
 
         start = time()
         # Set the symmetry occupations if present
@@ -181,7 +182,7 @@ def run_abs(
                     pyscf.symm.symmetrize_space(mol, scf_method_object.mo_coeff[0]),
                     pyscf.symm.symmetrize_space(mol, scf_method_object.mo_coeff[1]),
                 ]
-        scf_method_object = scf_method_object.newton()
+        scf_method_object = adb.symmetry_safe_newton(scf_method_object)
         scf_method_object.level_shift = 0.0
         scf_method_object.max_cycle = 50
         scf_method_object.kernel(mo_coeff_sym, scf_method_object.mo_occ)
@@ -410,7 +411,8 @@ def compute_fullbasis_criterion(
             scf_method_object.xc = xc
             scf_method_object.grids.level = grid_level
             scf_method_object.grids.prune = None
-        scf_method_object = scf_method_object.apply(scf.addons.remove_linear_dep_)
+        scf_method_object.remove_overlap_zero_eigenvalue = True
+        scf_method_object.overlap_zero_eigenvalue_threshold = 1e-6
 
         S = scf_method_object.get_ovlp()
 
@@ -423,7 +425,10 @@ def compute_fullbasis_criterion(
             scf_method_object.level_shift = 1.0
             scf_method_object.max_cycle = 3
             scf_method_object.kernel()
-            scf_method_object = scf_method_object.newton()
+            # See adb/scf_fixes.py: plain .newton() crashes when
+            # mol.symmetry is enabled and linear dependecies are removed
+            # (above) has actually reduced the basis.
+            scf_method_object = adb.symmetry_safe_newton(scf_method_object)
             scf_method_object.level_shift = 0.0
             scf_method_object.max_cycle = 50
             scf_method_object.kernel()
