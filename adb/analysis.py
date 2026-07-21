@@ -276,7 +276,8 @@ def _run_subbasis_scf(
         submf.xc = xc
         submf.grids.level = grid_level
         submf.grids.prune = None
-    submf = submf.apply(scf.addons.remove_linear_dep_)
+    submf.remove_overlap_zero_eigenvalue = True
+    submf.overlap_zero_eigenvalue_threshold = 1e-6
 
     # SCF initial guess by projecting the density from
     # full basis to current basis
@@ -315,8 +316,8 @@ def _run_subbasis_scf(
     # Use the level shift calulcation density as initial guess
     # Restore default parameters and switch to second order CIAH.
     # symmetry_safe_newton rather than .newton(): with mol.symmetry enabled
-    # and remove_linear_dep_ (above) actually reducing the basis, plain
-    # pyscf .newton() crashes -- see adb/scf_fixes.py for why.
+    # and linear dependencies removed (above) actually reducing the basis,
+    # plain pyscf .newton() crashes -- see adb/scf_fixes.py for why.
     submf = symmetry_safe_newton(submf)
     submf.level_shift = 0.0
     submf.max_cycle = 50

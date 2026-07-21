@@ -426,8 +426,8 @@ def compute_fullbasis_criterion(
             scf_method_object.max_cycle = 3
             scf_method_object.kernel()
             # See adb/scf_fixes.py: plain .newton() crashes when
-            # mol.symmetry is enabled and remove_linear_dep_ (above) has
-            # actually reduced the basis.
+            # mol.symmetry is enabled and linear dependecies are removed
+            # (above) has actually reduced the basis.
             scf_method_object = adb.symmetry_safe_newton(scf_method_object)
             scf_method_object.level_shift = 0.0
             scf_method_object.max_cycle = 50

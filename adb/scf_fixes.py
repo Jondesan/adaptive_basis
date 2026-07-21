@@ -2,8 +2,8 @@
 
 Currently contains one fix: pyscf's Newton/SOSCF solver (`mf.newton()`)
 crashes when `mol.symmetry` is enabled together with a mean-field object
-whose basis has been reduced relative to `mol.nao` -- e.g. via
-`scf.addons.remove_linear_dep_` on a large/diffuse basis where some AO
+whose basis has been reduced relative to `mol.nao` -- e.g. via pyscf's built-in
+linear dependency removal on a large/diffuse basis where some AO
 combinations are genuinely (near-)linearly dependent.
 
 Root cause (traced directly in `pyscf/soscf/newton_ah.py`'s
@@ -76,8 +76,8 @@ def symmetry_safe_newton(mf):
     """Drop-in replacement for `mf.newton()` / `pyscf.scf.newton(mf)`.
 
     Use this instead of calling `.newton()` directly whenever `mf.mol` may
-    have `symmetry` enabled together with a basis-reducing decorator such
-    as `scf.addons.remove_linear_dep_` -- that combination is exactly what
+    have `symmetry` enabled together with a basis-reducing linear dependency
+    removal built-into pyscf -- that combination is exactly what
     triggers the pyscf bug this module's docstring describes.
 
     Args:
