@@ -646,6 +646,9 @@ if __name__ == "__main__":
     bs = []
     bstemp = []
 
+    if symmetry_aware_search:
+        symm = True
+
     if len(basis) == 1 and os.path.isfile(basis[0]):
         f = open(basis[0])
         for line in f:
