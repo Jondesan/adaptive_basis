@@ -265,7 +265,14 @@ def _run_subbasis_scf(
 
     mask = smask_to_mask(smask, fullbasis_mol.cart)
     maskedS = mask_matrix(ovlp, mask)
-    if not np.allclose(maskedS, submf.get_ovlp()):
+    # atol above numpy's 1e-8 default: masking the full-basis overlap and
+    # computing the subbasis Mole's own overlap are two numerically
+    # equivalent but not bit-identical integral evaluations, and large
+    # diffuse basis sets (e.g. aug-pc-2 on a heavy atom) can differ by a
+    # few 1e-8 in near-zero entries between near-linearly-dependent
+    # diffuse functions -- physically negligible, but tighter than the
+    # default would flag it as a mismatch on every such basis.
+    if not np.allclose(maskedS, submf.get_ovlp(), atol=1e-6):
         raise RuntimeError('The masked overlap and the full overlap of masked molecule do not match!')
 
     if dft:

@@ -55,6 +55,23 @@ def h2o_sto3g_c2v():
     )
 
 @pytest.fixture(scope="session")
+def nh2_sto3g_c2v():
+    """Open-shell (doublet, UHF) analogue of h2o_sto3g_c2v.
+
+    Used by the UHF regression tests for scf_fixes.py's symmetry_safe_newton
+    (its rotate_mo patch needs a UHF-specific branch: mo_coeff/u are
+    spin-stacked (2, n, n) arrays there, not the plain 2D arrays the
+    restricted branch handles).
+    """
+    return pyscf.M(
+        atom="N 0 0 0; H 0 0.809 0.585; H 0 -0.809 0.585",
+        basis="sto-3g",
+        spin=1,
+        symmetry=True,
+        verbose=0,
+    )
+
+@pytest.fixture(scope="session")
 def h2o_mf(h2o_def2tzvp):
     mf = h2o_def2tzvp.HF()
     mf.verbose = 0
