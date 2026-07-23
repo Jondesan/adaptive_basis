@@ -193,7 +193,7 @@ def run_abs(
         fullbasis_hf_time = end - start
         F_scf = scf_method_object.get_fock()
 
-        if not mol.symmetry or mol.groupname == 'C1':
+        if (isinstance(mol.symmetry, bool) and not mol.symmetry) or mol.groupname == 'C1':
             irrep_nelec = None
         else:
             irrep_nelec = scf_method_object.get_irrep_nelec()
@@ -671,7 +671,6 @@ if __name__ == "__main__":
     if pnt_grp_file is not None:
         if not os.path.isfile(pnt_grp_file):
             RuntimeError(f'Path {pnt_grp_file} is not a valid file.')
-    
     mols = get_molecules_in_dir(
         molpath, bs, get_decontractions = dec, unit = unit,
         symmetry = symm,

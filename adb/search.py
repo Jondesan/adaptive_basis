@@ -51,11 +51,11 @@ def _validate_symmetry_aware_args(
     """
     if not symmetry_aware:
         return
-    if not (mol.symmetry and mol.groupname != 'C1'):
+    if isinstance(mol.symmetry, bool) and not mol.symmetry and mol.groupname != 'C1':
         raise RuntimeError(
             "find_subspace(symmetry_aware=True) requires mol.symmetry "
             "to be enabled with a non-C1 point group.")
-    if irrep_nelec is None:
+    if mol.groupname != 'C1' and irrep_nelec is None:
         raise RuntimeError(
             "find_subspace(symmetry_aware=True) requires irrep_nelec "
             "(the target per-irrep occupation) to be provided.")
