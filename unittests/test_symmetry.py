@@ -534,3 +534,66 @@ class TestMaskAnalysisTrackOrbitals:
             assert len(entry["orbitals"]) == h2o_sto3g_c2v.nelec[0]
             assert all(irrep in h2o_sto3g_c2v.irrep_name
                        for _, irrep in entry["orbitals"])
+
+
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.mask_analysis(check_stability=True)                                 │
+# ╰─────────────────────────────────────────────────────────────────────────╯
+
+@pytest.mark.slow
+class TestMaskAnalysisCheckStability:
+    """Integration tests for the optional internal-stability check/re-
+    optimization added to _run_subbasis_scf (see
+    adaptive_basis/untracked/jagged_convergence_check/REPORT.md for the
+    investigation this addresses). Real (if tiny) SCFs, marked slow like
+    TestMaskAnalysisTrackOrbitals above.
+
+    h2o_sto3g's RHF ground state is not expected to be internally unstable
+    at any subbasis size, so these don't exercise the reconverge branch
+    itself (that's validated against a real case -- FeO -- outside the
+    unit suite); they confirm the option is wired correctly and inert by
+    default.
+    """
+
+    def _run_find_subspace(self, mol):
+        mf = mol.RHF()
+        mf.verbose = 0
+        mf.kernel()
+        F, S = mf.get_fock(), mf.get_ovlp()
+        shellsep_mol = create_shell_separated_mol(mol)
+        mask_history = find_subspace(
+            F, S, mol, mf, conv_tol=0.5, verbose=False,
+            get_smask=True, return_mask_history=True,
+        )
+        return mf, F, S, shellsep_mol, mask_history
+
+    def test_default_is_unaffected(self, h2o_sto3g):
+        """check_stability defaults to False: calling mask_analysis with
+        no mention of it must reproduce calling it with check_stability=False
+        (regression safety for every existing call site). Compared with a
+        tolerance, not exact equality: re-running the identical SCF twice
+        already differs at the ~1e-13 level (BLAS-threading floating-point
+        noise, confirmed present with no check_stability involved at all
+        -- unrelated to this option)."""
+        mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_sto3g)
+        kwargs = {'verbose': False, 'C_full': mf.mo_coeff, 'calculate_correction': False}
+        result_default = mask_analysis(mask_history, shellsep_mol, mf, F, S, **kwargs)
+        result_explicit_false = mask_analysis(
+            mask_history, shellsep_mol, mf, F, S, check_stability=False, **kwargs)
+        assert len(result_default) == len(result_explicit_false)
+        for row_a, row_b in zip(result_default, result_explicit_false):
+            nfunc_a, _cursum_a, _diff_a, e_scf_a, *_rest_a, conv_a = row_a
+            nfunc_b, _cursum_b, _diff_b, e_scf_b, *_rest_b, conv_b = row_b
+            assert nfunc_a == nfunc_b
+            assert bool(conv_a) and bool(conv_b)
+            assert e_scf_a == pytest.approx(e_scf_b, abs=1e-8)
+
+    def test_enabled_runs_and_stays_converged(self, h2o_sto3g):
+        mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_sto3g)
+        result = mask_analysis(
+            mask_history, shellsep_mol, mf, F, S, verbose=False,
+            C_full=mf.mo_coeff, calculate_correction=False, check_stability=True,
+        )
+        assert isinstance(result, list) and len(result) >= 1
+        for row in result:
+            assert bool(row[-1])  # conv_stat: subbasis SCF still converged
