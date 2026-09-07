@@ -159,6 +159,9 @@ def point_group_from_file(path: str, mol_filename: str) -> str | bool:
         style="dim", markup=False)
     with open(path, 'r') as file:
         for line in file:
+            # Ignore empty lines
+            if len(line.strip()) == 0:
+                continue
             name, point_grp_label = line.split()
             if mol_filename == name:
                 pnt_grp = point_grp_label
