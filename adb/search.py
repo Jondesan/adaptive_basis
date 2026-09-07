@@ -51,7 +51,7 @@ def _validate_symmetry_aware_args(
     """
     if not symmetry_aware:
         return
-    if isinstance(mol.symmetry, bool) and not mol.symmetry and mol.groupname != 'C1':
+    if not mol.symmetry or mol.groupname == 'C1':
         raise RuntimeError(
             "find_subspace(symmetry_aware=True) requires mol.symmetry "
             "to be enabled with a non-C1 point group.")
