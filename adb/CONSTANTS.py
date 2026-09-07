@@ -55,3 +55,13 @@ SYMMETRY_SHORTFALL_PENALTY = 1e3
 # floating-point noise) ties, e.g. every remaining candidate being provably
 # irrelevant to an already-satisfied symmetry-aware target.
 EXPAND_MASK_EPS = 1e-12
+
+# Bound on how many times _run_subbasis_scf's optional stability-following
+# loop (check_stability=True) will rotate onto a lower-curvature orbital
+# set and reconverge before giving up, and the energy-improvement floor
+# (Ha) below which a round is considered to have stopped helping. Values
+# validated end-to-end against real internally-unstable sub-basis SCF
+# solutions (FeO/SAP-HF/SAP-HFS/VSAP) in
+# adaptive_basis/untracked/jagged_convergence_check/.
+STABILITY_MAX_ROUNDS = 5
+STABILITY_E_TOL = 1e-7

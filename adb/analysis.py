@@ -9,6 +9,7 @@ from pyscf.scf.addons import project_dm_nr2nr
 
 from .basisutil import extract_basis
 from .calculations import dual_basis_energy_correction, eig, get_q_sqrd
+from .CONSTANTS import STABILITY_MAX_ROUNDS, STABILITY_E_TOL
 from .ioutil import (
     print_data,
     print_data_footer,
@@ -181,6 +182,38 @@ def _print_verbose_init_summary(
     return last_mask, last_smask
 
 
+def _follow_instabilities(submf, max_rounds: int, e_tol: float):
+    """Repeatedly run internal stability analysis on a converged `submf`
+    and, if unstable, rotate onto the lower-curvature orbitals and
+    reconverge -- up to `max_rounds` times, or until a round is stable or
+    no longer improves the energy by more than `e_tol`. Mutates and
+    returns `submf`.
+
+    Internal stability only (`external=False`): this checks whether the
+    converged solution is a genuine local minimum within its own
+    ansatz (RHF/UHF/RKS/UKS as already chosen), not whether a different
+    ansatz (e.g. RHF -> UHF symmetry breaking) would do better -- that's
+    a separate, bigger question this isn't trying to answer.
+
+    Silently gives up and returns `submf` unchanged if `.stability()`
+    raises (e.g. not implemented for some mf class) -- callers that don't
+    opt into this (the default) never call it at all.
+    """
+    for _ in range(max_rounds):
+        try:
+            mo_i, _mo_e, stable_i, _stable_e = submf.stability(
+                internal=True, external=False, return_status=True)
+        except Exception:
+            return submf
+        if stable_i:
+            return submf
+        e_before = submf.e_tot
+        submf.kernel(dm0=submf.make_rdm1(mo_i, submf.mo_occ))
+        if not submf.converged or abs(submf.e_tot - e_before) < e_tol:
+            return submf
+    return submf
+
+
 def _run_subbasis_scf(
         smask:              np.ndarray,
         fullbasis_mol,
@@ -194,6 +227,7 @@ def _run_subbasis_scf(
         irrep_nelec:        dict | None,
         debug:              bool,
         original_irre_nelec: dict | None,
+        check_stability:    bool            = False,
         ) -> tuple:
     """Build and run a converged SCF calculation for the subbasis described by `smask`.
 
@@ -231,6 +265,15 @@ def _run_subbasis_scf(
     original_irre_nelec : dict, optional
         The full-basis irrep occupations, used only for the error message
         if the subbasis SCF's irrep occupations turn out inconsistent.
+    check_stability : bool, default False
+        Optional feature, off by default. When `True`, runs internal
+        stability analysis on the converged sub-basis SCF and, if
+        unstable, rotates onto the lower-curvature orbitals and
+        reconverges (see `_follow_instabilities`) before returning --
+        fixes cases where the sub-basis SCF converges to a genuine
+        non-ground stationary point rather than the true minimum
+        consistent with its occupation constraints. Default `False`:
+        behaviour is byte-identical to before this option existed.
 
     Returns
     -------
@@ -329,6 +372,9 @@ def _run_subbasis_scf(
     submf.level_shift = 0.0
     submf.max_cycle = 50
     submf.kernel()
+
+    if check_stability:
+        submf = _follow_instabilities(submf, STABILITY_MAX_ROUNDS, STABILITY_E_TOL)
 
     # Double check that occupations of the irreps have not changed
     if mol.symmetry and mol.groupname != 'C1':
@@ -442,6 +488,7 @@ def mask_analysis(
         irrep_nelec:            dict | None         = None,
         debug:                  bool                = False,
         track_orbitals:         bool                = False,
+        check_stability:        bool                = False,
         ) -> list | tuple[list, list]:
     """Run a converged SCF for every mask in a find_subspace history and tabulate the results.
 
@@ -504,6 +551,16 @@ def mask_analysis(
         orbital_history)`` instead of just `dataframe` -- existing call
         sites assigning the return value to a single variable are
         unaffected as long as this stays at its default.
+    check_stability : bool, default False
+        Optional feature, off by default. When `True`, every subbasis SCF
+        is checked for internal stability after converging and, if
+        unstable, re-optimized (see `_run_subbasis_scf`/
+        `_follow_instabilities`) -- fixes cases where a subbasis SCF
+        converges to a genuine non-ground stationary point rather than
+        the true minimum consistent with its occupation constraints (see
+        `adaptive_basis/untracked/jagged_convergence_check/REPORT.md` for
+        the investigation this addresses). Default `False`: behaviour is
+        byte-identical to before this option existed.
 
     Returns
     -------
@@ -551,7 +608,8 @@ def mask_analysis(
             smask = mask_i
             submf, subbasis_mol, mask = _run_subbasis_scf(
                 smask, fullbasis_mol, scf_obj, scf_obj_copy, mol, ovlp,
-                dft, xc, grid_level, irrep_nelec, debug, original_irre_nelec)
+                dft, xc, grid_level, irrep_nelec, debug, original_irre_nelec,
+                check_stability=check_stability)
             is_restricted = subbasis_mol.spin == 0
 
             subbasis_converged = submf.converged
