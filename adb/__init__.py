@@ -7,6 +7,11 @@ adb.find_subspace(...).
 from .orbitalutil import (
     get_occupied_orbitals,
     get_occupied_orbitals_from_scf,
+    get_frontier_orbitals_from_scf,
+)
+
+from .cycle_report import (
+    write_cycle_report,
 )
 
 from .initialization import (
@@ -72,6 +77,8 @@ from .ioutil import (
     print_labels_of_functions_in_mask,
     orbital_key,
     function_labels_from_mask,
+    open_run_log,
+    set_console_log_target,
 )
 
 from .scf_fixes import (

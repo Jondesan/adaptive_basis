@@ -28,7 +28,7 @@ from .maskutil import (
     smask_to_mask
 )
 from .molutil import create_shell_separated_mol
-from .orbitalutil import get_occupied_orbitals_from_scf
+from .orbitalutil import get_occupied_orbitals_from_scf, get_frontier_orbitals_from_scf
 from .scf_fixes import symmetry_safe_newton
 
 
@@ -192,8 +192,7 @@ def _follow_instabilities(submf, max_rounds: int, e_tol: float):
     Internal stability only (`external=False`): this checks whether the
     converged solution is a genuine local minimum within its own
     ansatz (RHF/UHF/RKS/UKS as already chosen), not whether a different
-    ansatz (e.g. RHF -> UHF symmetry breaking) would do better -- that's
-    a separate, bigger question this isn't trying to answer.
+    ansatz (e.g. RHF -> UHF symmetry breaking) would do better.
 
     Silently gives up and returns `submf` unchanged if `.stability()`
     raises (e.g. not implemented for some mf class) -- callers that don't
@@ -201,7 +200,7 @@ def _follow_instabilities(submf, max_rounds: int, e_tol: float):
     """
     for _ in range(max_rounds):
         try:
-            mo_i, _mo_e, stable_i, _stable_e = submf.stability(
+            mo_i, _, stable_i, _ = submf.stability(
                 internal=True, external=False, return_status=True)
         except Exception:
             return submf
@@ -228,6 +227,8 @@ def _run_subbasis_scf(
         debug:              bool,
         original_irre_nelec: dict | None,
         check_stability:    bool            = False,
+        log_stdout                          = None,
+        log_verbose:        int | None      = None,
         ) -> tuple:
     """Build and run a converged SCF calculation for the subbasis described by `smask`.
 
@@ -274,6 +275,17 @@ def _run_subbasis_scf(
         non-ground stationary point rather than the true minimum
         consistent with its occupation constraints. Default `False`:
         behaviour is byte-identical to before this option existed.
+    log_stdout : file-like, optional
+        Optional feature, off by default. If given, `subbasis_mol` (and
+        therefore `submf`, which inherits `.stdout`/`.verbose` from it at
+        construction time) has its pyscf logging routed to this handle
+        instead of the default. Meant to be a single handle shared across
+        an entire run (see `adb.open_run_log` and `find_subspace`'s
+        parameter of the same name) -- not a filename. Default `None`:
+        behaviour is byte-identical to before this option existed.
+    log_verbose : int, optional
+        Verbosity level to pair with `log_stdout`. Ignored if `log_stdout`
+        is `None`.
 
     Returns
     -------
@@ -300,6 +312,9 @@ def _run_subbasis_scf(
         ecp=ecp_bas, symmetry=fullbasis_mol.symmetry
     )
     subbasis_mol.build()
+    if log_stdout is not None:
+        subbasis_mol.stdout = log_stdout
+        subbasis_mol.verbose = log_verbose
     is_restricted = subbasis_mol.spin == 0
     if is_restricted:
         submf = subbasis_mol.RHF()
@@ -489,7 +504,10 @@ def mask_analysis(
         debug:                  bool                = False,
         track_orbitals:         bool                = False,
         check_stability:        bool                = False,
-        ) -> list | tuple[list, list]:
+        log_stdout                                  = None,
+        log_verbose:            int | None          = None,
+        cycle_report:           bool                = False,
+        ) -> list | tuple:
     """Run a converged SCF for every mask in a find_subspace history and tabulate the results.
 
     For each accepted step in `mask_history`, builds and converges the
@@ -561,6 +579,28 @@ def mask_analysis(
         `adaptive_basis/untracked/jagged_convergence_check/REPORT.md` for
         the investigation this addresses). Default `False`: behaviour is
         byte-identical to before this option existed.
+    log_stdout : file-like, optional
+        Optional feature, off by default. If given, every subbasis SCF's
+        `Mole`/mean-field object has its pyscf logging routed to this
+        handle instead of the default (see `_run_subbasis_scf`'s
+        parameter of the same name, and `adb.open_run_log`). Default
+        `None`: behaviour is byte-identical to before this option existed.
+    log_verbose : int, optional
+        Verbosity level to pair with `log_stdout`. Ignored if `log_stdout`
+        is `None`.
+    cycle_report : bool, default False
+        Optional feature, off by default, independent of `track_orbitals`.
+        When `True`, records occupied orbitals *and* the lowest few
+        virtual orbitals of each irrep (via
+        `adb.get_frontier_orbitals_from_scf`) for every subbasis -- unlike
+        `track_orbitals`'s occupied-only spectrum, this is enough to spot
+        an occupied/virtual energy inversion within an irrep directly (see
+        `adb.write_cycle_report`, meant to render this into a
+        human-readable report alongside `dataframe`). Does not affect or
+        share data with `track_orbitals`/`orbital_history` or
+        `adb.write_orbital_history`'s CSV format in any way. Default
+        `False`: behaviour is byte-identical to before this option
+        existed.
 
     Returns
     -------
@@ -570,9 +610,25 @@ def mask_analysis(
         squared projection onto the converged full-basis wavefunction,
         the mask/smask, the dual-basis correction (if
         `calculate_correction`), the full-basis HF energy it's relative
-        to, and whether the subbasis SCF converged. If `track_orbitals`,
-        a ``(dataframe, orbital_history)`` tuple is returned instead --
-        see the `track_orbitals` parameter.
+        to, and whether the subbasis SCF converged.
+
+        The return value's shape depends on which of `track_orbitals`/
+        `cycle_report` are set (each adds its own history list, in this
+        order, only when enabled -- so every combination not used by an
+        existing call site today is a tuple strictly longer than what it
+        already handles):
+
+        ================  =============  ===============================
+        track_orbitals    cycle_report   Return
+        ================  =============  ===============================
+        False             False          ``dataframe``
+        True              False          ``(dataframe, orbital_history)``
+        False             True           ``(dataframe, cycle_report_history)``
+        True              True           ``(dataframe, orbital_history, cycle_report_history)``
+        ================  =============  ===============================
+
+        See the `track_orbitals`/`cycle_report` parameters for what each
+        history list contains.
     """
     scf_obj_copy = scf_obj.copy()
     original_irre_nelec = None
@@ -585,6 +641,7 @@ def mask_analysis(
     initialized = False
     dataframe = []
     orbital_history = [] if track_orbitals else None
+    cycle_report_history = [] if cycle_report else None
     last_mask = [False] * fullbasis_mol.nao_nr()
     last_smask = None
     is_smask = isinstance(mask_history[0][0], np.ndarray)
@@ -609,7 +666,8 @@ def mask_analysis(
             submf, subbasis_mol, mask = _run_subbasis_scf(
                 smask, fullbasis_mol, scf_obj, scf_obj_copy, mol, ovlp,
                 dft, xc, grid_level, irrep_nelec, debug, original_irre_nelec,
-                check_stability=check_stability)
+                check_stability=check_stability,
+                log_stdout=log_stdout, log_verbose=log_verbose)
             is_restricted = subbasis_mol.spin == 0
 
             subbasis_converged = submf.converged
@@ -619,6 +677,12 @@ def mask_analysis(
                 orbital_history.append({
                     'nfunc': int(np.sum(mask)),
                     'orbitals': get_occupied_orbitals_from_scf(submf),
+                })
+
+            if cycle_report:
+                cycle_report_history.append({
+                    'nfunc': int(np.sum(mask)),
+                    'orbitals': get_frontier_orbitals_from_scf(submf),
                 })
 
             scf_orbital_energy = _scf_orbital_energy(submf, is_restricted)
@@ -659,7 +723,11 @@ def mask_analysis(
     if verbose:
         print_data_footer()
 
+    if track_orbitals and cycle_report:
+        return dataframe, orbital_history, cycle_report_history
     if track_orbitals:
         return dataframe, orbital_history
+    if cycle_report:
+        return dataframe, cycle_report_history
 
     return dataframe

@@ -193,7 +193,11 @@ def atomic_block_minimal_basis(
     return minimal_basis_mask
 
 
-def find_projected_minimal_basis_mask(mol: gto.Mole) -> np.ndarray:
+def find_projected_minimal_basis_mask(
+        mol:            gto.Mole,
+        log_stdout      = None,
+        log_verbose:    int | None = None,
+        ) -> np.ndarray:
     """Construct a minimal-basis mask by projecting onto an STO-3G reference.
 
     For each STO-3G shell, picks the single AO of `mol`'s own (larger)
@@ -204,6 +208,15 @@ def find_projected_minimal_basis_mask(mol: gto.Mole) -> np.ndarray:
     ----------
     mol : pyscf.gto.Mole
         Molecule object (in its own, larger basis).
+    log_stdout : file-like, optional
+        If given, applied to the STO-3G reference `Mole` this function
+        builds internally (see `find_subspace`'s parameter of the same
+        name). Needed explicitly here -- `create_mol_from_template`
+        `deepcopy`s `mol`, and pyscf's `Mole.__getstate__` silently drops
+        stream attributes across a copy, so the STO-3G mol would not
+        otherwise inherit `mol`'s logging target even if already set.
+    log_verbose : int, optional
+        Verbosity level to pair with `log_stdout`.
 
     Returns
     -------
@@ -217,6 +230,9 @@ def find_projected_minimal_basis_mask(mol: gto.Mole) -> np.ndarray:
         as many functions as the STO-3G reference has.
     """
     mol_sto3g = create_mol_from_template(mol, basis='sto3g')
+    if log_stdout is not None:
+        mol_sto3g.stdout = log_stdout
+        mol_sto3g.verbose = log_verbose
     mask = np.zeros(mol.nao_nr(), dtype=bool)
     s21 = intor_cross('int1e_ovlp', mol, mol_sto3g)
 

@@ -1,6 +1,8 @@
+import datetime
 import os
 from ast import literal_eval
 from copy import deepcopy
+from typing import TextIO
 from warnings import warn
 
 import numpy as np
@@ -14,6 +16,54 @@ from .molutil import create_mol_from_file, create_shell_separated_mol
 
 _console = Console()
 _err_console = Console(stderr=True)
+
+
+def open_run_log(path: str) -> TextIO:
+    """Open `path` for a run's external log file (see `set_console_log_target`
+    and the `log_stdout`/`log_verbose` parameters threaded through
+    `run_abs`/`find_subspace`/`mask_analysis`/`_run_subbasis_scf`).
+
+    Opened once, in write mode, for the whole run -- the returned handle is
+    meant to be assigned directly to `Mole.stdout` (never to `Mole.output`,
+    which pyscf reopens/truncates on every `Mole.build()` call; since `adb`
+    builds many `Mole` objects over one run -- one per ADB cycle -- using
+    `.output` would silently wipe out every earlier cycle's log, leaving
+    only the last one).
+
+    Parameters
+    ----------
+    path : str
+        Log file path.
+
+    Returns
+    -------
+    TextIO
+        The open file handle.
+    """
+    f = open(path, 'w', encoding='utf-8')
+    f.write(f'# adb run log, started {datetime.datetime.now()}\n\n')
+    f.flush()
+    return f
+
+
+def set_console_log_target(handle: TextIO) -> None:
+    """Redirect adb's own `rich`-based diagnostic output (shell-selection
+    tables, atomic-block-decomposition summaries, etc. -- everything
+    printed via this module's `_console`/`_err_console`) to `handle`.
+
+    This is a separate mechanism from pyscf's own logging (`Mole.stdout`/
+    `verbose`, handled by `open_run_log` and the `log_stdout`/`log_verbose`
+    parameters elsewhere) -- `rich.Console` knows nothing about `Mole`, so
+    both need to be pointed at the same file for "all the logging
+    information of a run" to actually land in one place.
+
+    Parameters
+    ----------
+    handle : TextIO
+        An open, writable file handle (e.g. from `open_run_log`).
+    """
+    _console.file = handle
+    _err_console.file = handle
 
 
 def get_files_in_folder(folder: str) -> list[str]:

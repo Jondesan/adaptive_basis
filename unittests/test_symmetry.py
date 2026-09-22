@@ -10,7 +10,8 @@ from adb import \
     get_iteration_criteria_value, \
     create_shell_separated_mol, \
     init_smask, set_linked_shells, smask_to_mask, \
-    write_orbital_history, CONSTANTS
+    write_orbital_history, CONSTANTS, \
+    open_run_log, write_cycle_report
 import pyscf
 
 
@@ -597,3 +598,203 @@ class TestMaskAnalysisCheckStability:
         assert isinstance(result, list) and len(result) >= 1
         for row in result:
             assert bool(row[-1])  # conv_stat: subbasis SCF still converged
+
+
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.mask_analysis(log_stdout=...)                                       │
+# ╰─────────────────────────────────────────────────────────────────────────╯
+
+@pytest.mark.slow
+class TestMaskAnalysisLogging:
+    """Integration tests for the optional log_stdout/log_verbose passthrough
+    added to find_subspace/mask_analysis/_run_subbasis_scf, so a whole
+    run.py invocation's pyscf-level output can be captured to one external
+    file (see run.py's --log_file/--log_verbose)."""
+
+    def _run_find_subspace(self, mol, **kwargs):
+        mf = mol.RHF()
+        mf.verbose = 0
+        mf.kernel()
+        F, S = mf.get_fock(), mf.get_ovlp()
+        shellsep_mol = create_shell_separated_mol(mol)
+        mask_history = find_subspace(
+            F, S, mol, mf, conv_tol=0.5, verbose=False,
+            get_smask=True, return_mask_history=True, **kwargs,
+        )
+        return mf, F, S, shellsep_mol, mask_history
+
+    def test_default_is_unaffected(self, h2o_sto3g):
+        """Omitting log_stdout must not touch stdout/verbose anywhere --
+        regression safety for every existing call site."""
+        stdout_before = h2o_sto3g.stdout
+        verbose_before = h2o_sto3g.verbose
+        mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_sto3g)
+        mask_analysis(
+            mask_history, shellsep_mol, mf, F, S, verbose=False,
+            C_full=mf.mo_coeff, calculate_correction=False,
+        )
+        assert h2o_sto3g.stdout is stdout_before
+        assert h2o_sto3g.verbose == verbose_before
+
+    def test_enabled_writes_to_file(self, h2o_sto3g, tmp_path):
+        log_path = tmp_path / "run.log"
+        with open(log_path, 'w') as handle:
+            mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(
+                h2o_sto3g, log_stdout=handle, log_verbose=5)
+            mask_analysis(
+                mask_history, shellsep_mol, mf, F, S, verbose=False,
+                C_full=mf.mo_coeff, calculate_correction=False,
+                log_stdout=handle, log_verbose=5,
+            )
+        content = log_path.read_text()
+        assert content, "log file should not be empty once logging is enabled"
+        assert "SCF" in content
+
+    def test_open_run_log_is_reused_across_cycles(self, h2o_def2tzvp, tmp_path):
+        """The whole point of using a shared handle instead of Mole.output:
+        confirm content from an *earlier* cycle survives a *later* cycle's
+        own Mole.build() (which would truncate a naively-reused filename).
+        Needs a basis with room to grow past the minimal seed (unlike
+        STO-3G, where the minimal basis already *is* the full basis) to
+        get more than one cycle."""
+        log_path = tmp_path / "run.log"
+        handle = open_run_log(str(log_path))
+        mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(
+            h2o_def2tzvp, log_stdout=handle, log_verbose=5)
+        mask_analysis(
+            mask_history, shellsep_mol, mf, F, S, verbose=False,
+            C_full=mf.mo_coeff, calculate_correction=False,
+            log_stdout=handle, log_verbose=5,
+        )
+        handle.close()
+        assert len(mask_history) > 1, "need >1 cycle for this check to mean anything"
+        content = log_path.read_text()
+        # Every cycle builds its own subbasis Mole; if an earlier cycle's
+        # output were being wiped by a later cycle's Mole.build(), the
+        # file would only ever contain one cycle's worth of "SCF" mentions.
+        assert content.count("SCF") > 1
+
+
+# ╭─────────────────────────────────────────────────────────────────────────╮
+# │ adb.mask_analysis(cycle_report=True) / adb.write_cycle_report           │
+# ╰─────────────────────────────────────────────────────────────────────────╯
+
+@pytest.mark.slow
+class TestMaskAnalysisCycleReport:
+    """Integration tests for the optional cycle_report passthrough -- an
+    independent sibling of track_orbitals that records occupied *and*
+    nearby virtual orbital energies per cycle, for the separate
+    write_cycle_report human-readable formatter (see run.py's
+    --cycle_report)."""
+
+    def _run_find_subspace(self, mol):
+        mf = mol.RHF()
+        mf.verbose = 0
+        mf.kernel()
+        F, S = mf.get_fock(), mf.get_ovlp()
+        shellsep_mol = create_shell_separated_mol(mol)
+        mask_history = find_subspace(
+            F, S, mol, mf, conv_tol=0.5, verbose=False,
+            get_smask=True, return_mask_history=True,
+        )
+        return mf, F, S, shellsep_mol, mask_history
+
+    def test_default_is_unaffected(self, h2o_sto3g):
+        """cycle_report defaults to False: omitting it must reproduce the
+        exact same return shape/values as explicitly passing False --
+        regression safety for every existing call site (which never
+        mentions cycle_report at all)."""
+        mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_sto3g)
+        kwargs = {'verbose': False, 'C_full': mf.mo_coeff, 'calculate_correction': False}
+        result_default = mask_analysis(mask_history, shellsep_mol, mf, F, S, **kwargs)
+        result_explicit_false = mask_analysis(
+            mask_history, shellsep_mol, mf, F, S, cycle_report=False, **kwargs)
+        assert isinstance(result_default, list)
+        assert len(result_default) == len(result_explicit_false)
+        for row_a, row_b in zip(result_default, result_explicit_false):
+            assert row_a[0] == row_b[0]  # nfunc
+            assert row_a[3] == pytest.approx(row_b[3], abs=1e-8)  # E_scf
+
+    def test_enabled_returns_extra_history(self, h2o_def2tzvp):
+        mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_def2tzvp)
+        kwargs = {'verbose': False, 'C_full': mf.mo_coeff, 'calculate_correction': False}
+        result = mask_analysis(
+            mask_history, shellsep_mol, mf, F, S, cycle_report=True, **kwargs)
+        assert isinstance(result, tuple) and len(result) == 2
+        dataframe, cycle_report_history = result
+        assert len(dataframe) == len(cycle_report_history)
+        for row, entry in zip(dataframe, cycle_report_history):
+            assert entry['nfunc'] == row[0]
+            occ = [o for o in entry['orbitals'] if o[2]]
+            virt = [o for o in entry['orbitals'] if not o[2]]
+            assert len(occ) > 0
+            assert len(virt) > 0
+
+    def test_both_flags_together(self, h2o_def2tzvp):
+        mf, F, S, shellsep_mol, mask_history = self._run_find_subspace(h2o_def2tzvp)
+        result = mask_analysis(
+            mask_history, shellsep_mol, mf, F, S, verbose=False,
+            C_full=mf.mo_coeff, calculate_correction=False,
+            track_orbitals=True, cycle_report=True,
+        )
+        assert isinstance(result, tuple) and len(result) == 3
+        dataframe, orbital_history, cycle_report_history = result
+        assert len(dataframe) == len(orbital_history) == len(cycle_report_history)
+
+
+class TestWriteCycleReport:
+    """Unit tests for the standalone formatter, fed synthetic data --
+    doesn't need a real SCF run."""
+
+    def _synthetic_row(self, nfunc, e_scf, mask):
+        return [nfunc, 0.0, 0.0, e_scf, 0.0, 0.0, mask, 0.0, 0.0, True]
+
+    def test_writes_expected_sections(self, h2o_sto3g, tmp_path):
+        nao = h2o_sto3g.nao_nr()
+        mask1 = np.zeros(nao, dtype=bool)
+        mask1[:3] = True
+        mask2 = mask1.copy()
+        mask2[3] = True
+
+        dataframe = [
+            self._synthetic_row(3, -74.9, mask1),
+            self._synthetic_row(4, -75.0, mask2),
+        ]
+        cycle_report_history = [
+            {'nfunc': 3, 'orbitals': [(-20.0, None, True, None), (-1.0, None, False, None)]},
+            {'nfunc': 4, 'orbitals': [(-20.0, None, True, None), (-0.9, None, False, None)]},
+        ]
+
+        path = tmp_path / "report.txt"
+        write_cycle_report(str(path), dataframe, cycle_report_history, h2o_sto3g,
+                            header_info={'molecule': 'h2o'})
+        content = path.read_text()
+        assert "molecule: h2o" in content
+        assert "Cycle 0" in content and "Cycle 1" in content
+        assert "nfunc=3" in content and "nfunc=4" in content
+        assert "E_scf=-74.900000" in content
+        assert "Added functions" in content
+        assert "Frontier orbitals by irrep" in content
+
+    def test_flags_occ_virt_inversion(self, h2o_sto3g, tmp_path):
+        nao = h2o_sto3g.nao_nr()
+        mask = np.zeros(nao, dtype=bool)
+        mask[:3] = True
+        dataframe = [self._synthetic_row(3, -74.9, mask)]
+        # occ energy (-0.5) above virt energy (-0.6): a real inversion.
+        cycle_report_history = [
+            {'nfunc': 3, 'orbitals': [(-0.5, 'A1', True, None), (-0.6, 'A1', False, None)]},
+        ]
+        path = tmp_path / "report.txt"
+        write_cycle_report(str(path), dataframe, cycle_report_history, h2o_sto3g)
+        assert "INVERSION" in path.read_text()
+
+    def test_mismatched_nfunc_raises(self, h2o_sto3g, tmp_path):
+        nao = h2o_sto3g.nao_nr()
+        mask = np.zeros(nao, dtype=bool)
+        mask[:3] = True
+        dataframe = [self._synthetic_row(3, -74.9, mask)]
+        cycle_report_history = [{'nfunc': 4, 'orbitals': []}]
+        with pytest.raises(ValueError):
+            write_cycle_report(str(tmp_path / "report.txt"), dataframe,
+                                cycle_report_history, h2o_sto3g)

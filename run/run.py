@@ -74,8 +74,28 @@ def run_abs(
     debug=False,
     symmetry_aware_search=False,
     track_orbitals=False,
+    log_stdout=None,
+    log_verbose=None,
+    cycle_report=False,
     ):
-    """Run subbasis iteration for molecules in mol_list"""
+    """Run subbasis iteration for molecules in mol_list.
+
+    cycle_report: optional, off by default, independent of track_orbitals.
+    When True, also writes a human-readable '<fname>.cycle_report.txt'
+    per (molecule, basis, guess) summarizing each ADB cycle's added basis
+    functions, converged SCF energy, and per-irrep occupied/virtual
+    orbital energies (see adb.write_cycle_report / adb.mask_analysis's
+    cycle_report parameter).
+
+    log_stdout, log_verbose: optional, off by default. If log_stdout is
+    given (a single open file handle, e.g. from adb.open_run_log -- not a
+    filename), every Mole/SCF object this function and the adb pipeline it
+    drives build -- the full-basis reference SCF, the ADB search's own
+    internal initialization mols, and every subbasis SCF in mask_analysis
+    -- has its pyscf logging routed there instead of the default, at
+    log_verbose. See --log_file/--log_verbose below. Default None:
+    behaviour is byte-identical to before these options existed.
+    """
 
     """
     dataframe structure:
@@ -132,6 +152,9 @@ def run_abs(
                 symmetry_occ_fname, molfname=molfilename)
         
         # Set up Hartree-Fock, remove linear dependencies from basis
+        if log_stdout is not None:
+            mol.stdout = log_stdout
+            mol.verbose = log_verbose
         if is_restricted:
             scf_method_object = mol.RHF()
         else:
@@ -280,6 +303,8 @@ def run_abs(
                         abd_initialization=abd_init,
                         abd_Q_tol=q_tol,
                         track_orbitals=track_orbitals,
+                        log_stdout=log_stdout,
+                        log_verbose=log_verbose,
                         **symmetry_aware_kwargs,
                     )
                     if track_orbitals:
@@ -297,14 +322,37 @@ def run_abs(
                         irrep_nelec = irrep_nelec,
                         debug = debug,
                         track_orbitals = track_orbitals,
+                        log_stdout = log_stdout,
+                        log_verbose = log_verbose,
+                        cycle_report = cycle_report,
                     )
-                    if track_orbitals:
+                    # mask_analysis's return shape depends on which of
+                    # track_orbitals/cycle_report were requested -- see its
+                    # docstring's table. Neither/track_orbitals-only match
+                    # today's existing unpacking exactly; the other two are
+                    # new.
+                    cycle_report_history = None
+                    if track_orbitals and cycle_report:
+                        data_sbys, scf_orbital_history, cycle_report_history = mask_analysis_result
+                    elif track_orbitals:
                         data_sbys, scf_orbital_history = mask_analysis_result
+                    elif cycle_report:
+                        data_sbys, cycle_report_history = mask_analysis_result
+                    else:
+                        data_sbys = mask_analysis_result
+                    if track_orbitals:
                         adb.write_orbital_history(
                             scf_orbital_history, fn=f'{ODIR}/{fname}.scf_orbitals',
                             molname=molname, basisname=bsname)
-                    else:
-                        data_sbys = mask_analysis_result
+                    if cycle_report:
+                        adb.write_cycle_report(
+                            f'{ODIR}/{fname}.cycle_report.txt', data_sbys,
+                            cycle_report_history, shellsep_mol,
+                            header_info={
+                                'molecule': molname, 'basis': bsname,
+                                'charge': charge, 'spin': spin, 'init_guess': ig,
+                            },
+                        )
                     end = time()
 
                     f.write(f"{end-start:15.9e}\n\n")
@@ -616,8 +664,43 @@ if __name__ == "__main__":
              "--symmetry_aware_search is off) at every ADB cycle, and save "
              "them to '<output_dir>/<fname>.orbitals.csv'.",
     )
+    parser.add_argument(
+        "--log_file", type=str, default=None,
+        help="Optional, off by default. Path to write a single external log "
+             "file capturing every pyscf-level log message (SCF cycles, "
+             "CIAH progress, symmetry notices) for the whole run -- the "
+             "full-basis reference SCF, the ADB search's own "
+             "initialization, and every subbasis SCF in mask_analysis -- "
+             "plus adb's own diagnostic output (shell-selection tables, "
+             "atomic-block-decomposition summaries) that otherwise only "
+             "goes to the terminal. Opened once and reused for the whole "
+             "run, so earlier cycles are never overwritten by later ones.",
+    )
+    parser.add_argument(
+        "--log_verbose", type=int, default=5,
+        help="pyscf verbosity level applied throughout the run when "
+             "--log_file is given (default 5, pyscf's INFO level: SCF "
+             "energies, CIAH progress, symmetry notices, without the "
+             "chattier DEBUG tiers). Ignored if --log_file is not set.",
+    )
+    parser.add_argument(
+        "--cycle_report",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Optional feature, off by default, independent of "
+             "--track_orbitals/--log_file. Write a human-readable "
+             "'<fname>.cycle_report.txt' per (molecule, basis, guess) "
+             "summarizing every ADB cycle: added basis functions, "
+             "converged SCF energy, and per-irrep occupied/virtual "
+             "orbital energies -- enough to spot an occupied/virtual "
+             "energy inversion within an irrep (a sub-basis SCF converged "
+             "to a non-ground configuration) directly in the file.",
+    )
 
     args = parser.parse_args()
+
+    if args.log_verbose != 5 and args.log_file is None:
+        parser.error("--log_verbose has no effect without --log_file")
 
     basis = np.asarray(args.basis)
     molpath = args.mpath
@@ -643,6 +726,14 @@ if __name__ == "__main__":
     debug = args.debug
     symmetry_aware_search = args.symmetry_aware_search
     track_orbitals = args.track_orbitals
+    cycle_report = args.cycle_report
+
+    log_stdout = None
+    log_verbose = None
+    if args.log_file is not None:
+        log_stdout = adb.open_run_log(args.log_file)
+        log_verbose = args.log_verbose
+
     bs = []
     bstemp = []
 
@@ -698,6 +789,9 @@ if __name__ == "__main__":
                 debug = debug,
                 symmetry_aware_search = symmetry_aware_search,
                 track_orbitals = track_orbitals,
+                log_stdout = log_stdout,
+                log_verbose = log_verbose,
+                cycle_report = cycle_report,
                 )
         case 'full_crit':
             compute_fullbasis_criterion(

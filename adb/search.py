@@ -82,6 +82,8 @@ def _initialize_mask(
         initialize_by_projection:   bool,
         spherical_average:          bool,
         abd_Q_tol:                  float,
+        log_stdout                 = None,
+        log_verbose:                int | None = None,
         ) -> tuple[np.ndarray, np.ndarray]:
     """Dispatch to one of `find_subspace`'s three initial-mask strategies.
 
@@ -117,7 +119,8 @@ def _initialize_mask(
     elif initialize_by_projection:
         if verbose:
             print_projection_initialization_message()
-        mask = find_projected_minimal_basis_mask(mol)
+        mask = find_projected_minimal_basis_mask(
+            mol, log_stdout=log_stdout, log_verbose=log_verbose)
         mask_init_idx = np.where(mask)[0]
     else:
         mask_init_idx = [np.argmin(Fii)]
@@ -164,6 +167,8 @@ def find_subspace(
         symmetry_aware:             bool            = False,
         irrep_nelec:                dict | None     = None,
         track_orbitals:             bool            = False,
+        log_stdout                                 = None,
+        log_verbose:                int | None      = None,
         ) -> np.ndarray | list | tuple:
     r"""Greedily grow an AO subspace that approximately solves FC = SCE.
 
@@ -254,6 +259,24 @@ def find_subspace(
         `orbital_history` is a list of ``{'nfunc': int, 'orbitals':
         [(energy, irrep_label), ...]}`` dicts, one per recorded cycle,
         saveable via `adb.write_orbital_history`.
+    log_stdout : file-like, optional
+        Optional feature, off by default. If given, every real (i.e.
+        SCF-relevant) `Mole` this function builds internally -- currently
+        just the STO-3G reference mol built for
+        `initialize_by_projection` -- has its `.stdout` set to this handle
+        instead of the pyscf default, so pyscf's own logging output lands
+        there. Meant to be a single file handle shared across an entire
+        `run.py` invocation (see `adb.open_run_log`) -- not a filename:
+        `Mole.build()` reopens/truncates `.output` on every call, which
+        would silently discard earlier cycles' logs if used naively across
+        the many `Mole` objects one ADB run builds. Trial-candidate `Mole`s
+        built inside `expand_mask`'s `symmetry_aware` search are
+        deliberately excluded (no SCF runs there, just repeated
+        molecule-build banners). Default `None`: behaviour is
+        byte-identical to before this option existed.
+    log_verbose : int, optional
+        Verbosity level to pair with `log_stdout`. Ignored if `log_stdout`
+        is `None`.
 
     Returns
     -------
@@ -277,7 +300,8 @@ def find_subspace(
     mask, _ = _initialize_mask(
         mol, F, S, fullbasis_mol, verbose,
         abd_initialization, initialize_by_projection,
-        spherical_average, abd_Q_tol)
+        spherical_average, abd_Q_tol,
+        log_stdout=log_stdout, log_verbose=log_verbose)
     smask = None
     nocc = mol.nelec
 

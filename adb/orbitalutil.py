@@ -127,3 +127,67 @@ def get_occupied_orbitals_from_scf(mf) -> list[tuple[float, str | None]]:
                 if occ > 0:
                     occupied.append((float(e), lbl))
     return occupied
+
+
+def get_frontier_orbitals_from_scf(
+        mf, n_virtual: int = 3
+        ) -> list[tuple[float, str | None, bool, str | None]]:
+    """Extract occupied orbitals *and* the lowest few virtual orbitals of
+    each irrep from a converged SCF -- for spotting occupied/virtual
+    energy inversions within an irrep (a direct signature of a sub-basis
+    SCF converged to a non-ground configuration; see
+    `adaptive_basis/untracked/jagged_convergence_check/REPORT.md`'s FeO
+    case for the by-hand version of exactly this check).
+
+    Independent sibling of `get_occupied_orbitals_from_scf`, which it does
+    not modify: that function's `(energy, irrep)` return shape is relied
+    on by `write_orbital_history`'s CSV format, so extending it in place
+    would be a breaking change. This one returns a 4th field per orbital
+    instead, and is used only by the separate `cycle_report` feature.
+
+    Parameters
+    ----------
+    mf : pyscf.scf.hf.SCF
+        A converged mean-field object.
+    n_virtual : int, default 3
+        How many of the lowest-energy virtual orbitals to keep per irrep
+        (or overall, if `mf.mol` has no symmetry). All occupied orbitals
+        are always kept.
+
+    Returns
+    -------
+    list of (float, str or None, bool, str or None)
+        One ``(energy, irrep_label, is_occupied, spin_label)`` tuple per
+        kept MO. `irrep_label` is `None` throughout when
+        ``mf.mol.symmetry`` is off/C1. `spin_label` is `None` for a
+        restricted `mf`, else ``'alpha'``/``'beta'``.
+    """
+    mol = mf.mol
+    has_symmetry = bool(mol.symmetry) and mol.groupname != 'C1'
+    restricted = (np.asarray(mf.mo_occ, dtype=object).ndim == 1)
+
+    def _labels(mo_coeff):
+        if not has_symmetry:
+            return [None] * mo_coeff.shape[1]
+        return list(symm.label_orb_symm(mol, mol.irrep_name, mol.symm_orb, mo_coeff))
+
+    def _channel(mo_energy, mo_occ, mo_coeff, spin_label):
+        by_irrep_occ: dict = {}
+        by_irrep_virt: dict = {}
+        for e, occ, lbl in zip(mo_energy, mo_occ, _labels(mo_coeff)):
+            bucket = by_irrep_occ if occ > 0 else by_irrep_virt
+            bucket.setdefault(lbl, []).append(float(np.real(e)))
+
+        kept = []
+        for lbl, energies in by_irrep_occ.items():
+            for e in energies:
+                kept.append((e, lbl, True, spin_label))
+        for lbl, energies in by_irrep_virt.items():
+            for e in sorted(energies)[:n_virtual]:
+                kept.append((e, lbl, False, spin_label))
+        return kept
+
+    if restricted:
+        return _channel(mf.mo_energy, mf.mo_occ, mf.mo_coeff, None)
+    return (_channel(mf.mo_energy[0], mf.mo_occ[0], mf.mo_coeff[0], 'alpha')
+            + _channel(mf.mo_energy[1], mf.mo_occ[1], mf.mo_coeff[1], 'beta'))
