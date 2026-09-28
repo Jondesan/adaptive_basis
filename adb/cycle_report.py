@@ -9,16 +9,17 @@ rather than reading raw pyscf logging or reconstructing this by hand from
 `adaptive_basis/untracked/jagged_convergence_check/REPORT.md`).
 
 Pure post-processing: everything here is built from `mask_analysis`'s own
-already-computed return values (`dataframe`, `cycle_report_history`) plus
-already-existing utilities (`adb.smask_to_mask`,
-`adb.function_labels_from_mask`) -- no new knowledge of the ADB search or
-SCF machinery is needed in this module.
+already-computed return values (`dataframe`, `cycle_report_history`) and
+`mol.ao_labels()` -- no new knowledge of the ADB search or SCF machinery
+is needed in this module.
 """
 
 import datetime
+import re
+
+from pyscf.gto.mole import cart_labels, sph_labels
 
 from .maskutil import smask_to_mask
-from .ioutil import function_labels_from_mask
 
 
 def _mask_of(mask_field, mol):
@@ -33,14 +34,123 @@ def _mask_of(mask_field, mol):
     return smask_to_mask(mask_field, mol.cart)
 
 
-def _format_added_functions(mask, prev_mask, mol):
+# ---------------------------------------------------------------------------
+# sigma/pi/delta/... axis-character classification, from raw AO labels.
+# ---------------------------------------------------------------------------
+
+# |m_l| -> name, for the shells pyscf labels by explicit signed m_l
+# ('4f-2', '4f+0', ...  see _axis_character below).
+_AXIS_CHARACTER_NAMES = ['sigma', 'pi', 'delta', 'phi', 'gamma', 'eta', 'iota']
+
+# p/d shells (l=1,2) are labeled with descriptive Cartesian-combination
+# suffixes rather than signed m_l -- mapped by hand, verified empirically
+# against pyscf (see write_cycle_report's docstring): a z-axis-aligned
+# lobe (z, z^2) is sigma; a lobe linear in x or y together with at most
+# one z (x, y, xz, yz) is pi; a lobe quadratic in x/y alone (xy, x2-y2)
+# is delta. This exactly reproduces the standard Coov -> C2v correlation
+# table (Sigma+ -> A1, Pi -> B1+B2, Delta -> A1+A2).
+_P_D_SIGMA = {'z', 'z^2'}
+_P_D_PI = {'x', 'y', 'xz', 'yz'}
+_P_D_DELTA = {'xy', 'x2-y2'}
+
+_SHELL_TOKEN_RE = re.compile(r'^[0-9]+([spdfghik])(.*)$')
+
+
+def _axis_character(shell_token: str) -> str | None:
+    """Classify one shell token (e.g. '3dxz', '4f-2', '2s' -- the last
+    whitespace-separated part of a raw `mol.ao_labels()`/`cart_labels()`
+    entry, *not* shell-collapsed the way `adb.function_labels_from_mask`
+    labels are) by its angular character along the z axis.
+
+    Assumes z is the molecular axis, as pyscf orients a linear molecule
+    for the abelian point groups this project forces them into (C2v/D2h,
+    for FeO/GaO/CuH-style diatomics). Verified empirically: for FeO/C2v,
+    Fe 2pz and 3dz^2 land in the fully symmetric irrep alongside s
+    functions (sigma character); 2px/2py and 3dxz/3dyz pair up as B1/B2
+    (pi); 3dx2-y2/3dxy pair up as A1/A2 (delta) -- exactly the standard
+    Coov -> C2v correlation table. Only physically meaningful for a
+    linear molecule; harmless (just not meaningful) otherwise.
+
+    Returns one of 'sigma'/'pi'/'delta'/'phi'/... (sigma = |m_l| = 0,
+    pi = |m_l| = 1, etc.), or `None` if `shell_token` can't be classified
+    this way -- a Cartesian d/f/... component beyond xy/xz/yz (e.g.
+    Cartesian 'xx'/'yy'/'zz', not individually pure angular-momentum
+    eigenstates), or an unrecognized format.
+    """
+    m = _SHELL_TOKEN_RE.match(shell_token)
+    if m is None:
+        return None
+    letter, suffix = m.group(1), m.group(2)
+    if letter == 's':
+        return 'sigma'
+    if suffix[:1] in ('+', '-'):
+        # f and beyond: pyscf labels these directly by signed m_l,
+        # e.g. '4f-2', '4f+0', '4f+3'.
+        try:
+            abs_m = abs(int(suffix))
+        except ValueError:
+            return None
+        if abs_m < len(_AXIS_CHARACTER_NAMES):
+            return _AXIS_CHARACTER_NAMES[abs_m]
+        return f'|m_l|={abs_m}'
+    if suffix in _P_D_SIGMA:
+        return 'sigma'
+    if suffix in _P_D_PI:
+        return 'pi'
+    if suffix in _P_D_DELTA:
+        return 'delta'
+    return None  # e.g. Cartesian xx/yy/zz
+
+
+def _ao_labels(mol):
+    return cart_labels(mol) if mol.cart else sph_labels(mol)
+
+
+def _character_breakdown(mask, ao_labels):
+    """Group the AOs selected by `mask` by (atom, axis character).
+
+    Returns ``{'<atom_id> <atom_symbol>': {character: [shell_token, ...]}}``,
+    e.g. ``{'0 Fe': {'sigma': ['3dz^2', '4s'], 'pi': ['3dxz', '3dyz']}}``.
+    Unclassifiable labels (see `_axis_character`) are grouped under the
+    key ``'unclassified'``.
+    """
+    by_atom: dict = {}
+    for label, selected in zip(ao_labels, mask):
+        if not selected:
+            continue
+        parts = label.split()
+        atom_key = f'{parts[0]} {parts[1]}'
+        token = parts[-1]
+        char = _axis_character(token) or 'unclassified'
+        by_atom.setdefault(atom_key, {}).setdefault(char, []).append(token)
+    return by_atom
+
+
+def _format_added_functions(mask, prev_mask, ao_labels):
     added = mask & ~prev_mask
     if not added.any():
         return "  (none -- same basis as previous cycle)"
-    by_atom = function_labels_from_mask(added, mol)
+    breakdown = _character_breakdown(added, ao_labels)
     lines = []
-    for atom, shells in by_atom.items():
-        lines.append(f"  {atom}: {', '.join(shells)}")
+    for atom, chars in breakdown.items():
+        parts = [f"{char} [{', '.join(sorted(tokens))}]" for char, tokens in sorted(chars.items())]
+        lines.append(f"  {atom}: {'; '.join(parts)}")
+    return "\n".join(lines)
+
+
+def _format_basis_composition(mask, ao_labels):
+    """Compact per-atom character *counts* for the whole current
+    sub-basis (not just what changed this cycle) -- deliberately counts
+    rather than lists every function, so this stays readable once the
+    sub-basis has grown large, unlike `_format_added_functions` (always
+    small: only what's new this cycle)."""
+    breakdown = _character_breakdown(mask, ao_labels)
+    if not breakdown:
+        return "  (empty)"
+    lines = []
+    for atom, chars in breakdown.items():
+        counts = [f"{char}={len(tokens)}" for char, tokens in sorted(chars.items())]
+        lines.append(f"  {atom}: {'  '.join(counts)}")
     return "\n".join(lines)
 
 
@@ -75,6 +185,14 @@ def write_cycle_report(path, dataframe, cycle_report_history, mol, header_info=N
     `cycle_report_history` (per-irrep occupied/virtual orbital energies,
     from `cycle_report=True`) into one file, one clearly delimited block
     per ADB cycle.
+
+    Each cycle's block reports, per atom, the *axis character*
+    (sigma/pi/delta/phi/...) of both the functions added that cycle and
+    the full current sub-basis composition -- see `_axis_character`'s
+    docstring for exactly how this is determined and its (linear-molecule)
+    scope. This is a pure, additional interpretation of the raw AO labels
+    already available; it needs no symmetry/irrep information and works
+    the same whether or not the run used `--symmetry`/`--point_group_file`.
 
     Parameters
     ----------
@@ -111,10 +229,15 @@ def write_cycle_report(path, dataframe, cycle_report_history, mol, header_info=N
             f"sequences -- did they come from the same mask_analysis call? "
             f"{nfuncs} != {report_nfuncs}")
 
+    ao_labels = _ao_labels(mol)
+
     lines = [f"# adb cycle report, generated {datetime.datetime.now()}"]
     if header_info:
         for key, val in header_info.items():
             lines.append(f"# {key}: {val}")
+    lines.append("# Axis character (sigma/pi/delta/...) assumes z is the molecular")
+    lines.append("# axis, as pyscf orients linear molecules for C2v/D2h; only")
+    lines.append("# physically meaningful for a linear molecule.")
     lines.append("")
 
     prev_mask = None
@@ -128,8 +251,11 @@ def write_cycle_report(path, dataframe, cycle_report_history, mol, header_info=N
         lines.append("=" * 80)
         lines.append(f"Cycle {i}   nfunc={nfunc}   E_scf={e_scf:.6f} Ha   converged={bool(conv_stat)}")
         lines.append("=" * 80)
-        lines.append("Added functions:")
-        lines.append(_format_added_functions(mask, prev_mask, mol))
+        lines.append("Added functions (by axis character):")
+        lines.append(_format_added_functions(mask, prev_mask, ao_labels))
+        lines.append("")
+        lines.append("Current basis composition (axis character counts):")
+        lines.append(_format_basis_composition(mask, ao_labels))
         lines.append("")
         lines.append("Frontier orbitals by irrep (occ / lowest virt) [Ha]:")
         lines.append(_format_frontier_orbitals(entry['orbitals']))

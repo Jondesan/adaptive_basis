@@ -742,6 +742,49 @@ class TestMaskAnalysisCycleReport:
         assert len(dataframe) == len(orbital_history) == len(cycle_report_history)
 
 
+class TestAxisCharacterClassification:
+    """Unit tests for cycle_report._axis_character -- the sigma/pi/delta/...
+    classifier for raw (unstripped) AO shell tokens. Expected values
+    confirmed empirically against pyscf (FeO/C2v: Fe 2pz/3dz^2 land in
+    the fully symmetric irrep alongside s functions; 2px/2py and
+    3dxz/3dyz pair up as B1/B2; 3dx2-y2/3dxy pair up as A1/A2 -- exactly
+    the standard Coov -> C2v correlation table)."""
+
+    @pytest.mark.parametrize("token,expected", [
+        ("2s", "sigma"), ("4s", "sigma"),
+        ("2pz", "sigma"), ("2px", "pi"), ("2py", "pi"),
+        ("3dz^2", "sigma"), ("3dxz", "pi"), ("3dyz", "pi"),
+        ("3dxy", "delta"), ("3dx2-y2", "delta"),
+        ("4f+0", "sigma"), ("4f+1", "pi"), ("4f-1", "pi"),
+        ("4f+2", "delta"), ("4f-2", "delta"), ("4f+3", "phi"), ("4f-3", "phi"),
+    ])
+    def test_known_labels(self, token, expected):
+        from adb.cycle_report import _axis_character
+        assert _axis_character(token) == expected
+
+    def test_unclassifiable_returns_none(self):
+        from adb.cycle_report import _axis_character
+        # Cartesian d components xx/yy/zz are not individually pure
+        # angular-momentum eigenstates.
+        assert _axis_character("3dxx") is None
+        assert _axis_character("not_a_shell_token") is None
+
+    def test_real_ao_labels_on_linear_molecule(self):
+        """End-to-end check against a real Mole, not just hand-picked
+        tokens -- confirms the classifier agrees with itself on the
+        format mol.ao_labels() actually produces."""
+        from adb.cycle_report import _axis_character
+        mol = pyscf.M(atom="Fe 0 0 0; O 0 0 1.6", basis="def2-tzvp",
+                       spin=4, symmetry="c2v", verbose=0)
+        by_label = {label.split()[-1]: _axis_character(label.split()[-1])
+                    for label in mol.ao_labels() if "Fe" in label}
+        assert by_label["2pz"] == "sigma"
+        assert by_label["2px"] == by_label["2py"] == "pi"
+        assert by_label["3dz^2"] == "sigma"
+        assert by_label["3dxz"] == by_label["3dyz"] == "pi"
+        assert by_label["3dxy"] == by_label["3dx2-y2"] == "delta"
+
+
 class TestWriteCycleReport:
     """Unit tests for the standalone formatter, fed synthetic data --
     doesn't need a real SCF run."""
@@ -788,6 +831,42 @@ class TestWriteCycleReport:
         path = tmp_path / "report.txt"
         write_cycle_report(str(path), dataframe, cycle_report_history, h2o_sto3g)
         assert "INVERSION" in path.read_text()
+
+    def test_axis_character_sections(self, h2o_sto3g, tmp_path):
+        """O's 2s (index 1) is added first, then 2px/2py/2pz (indices
+        2-4) -- confirms 'Added functions' and 'Current basis
+        composition' both surface the sigma/pi character breakdown, not
+        just shell labels."""
+        nao = h2o_sto3g.nao_nr()  # ao_labels: 0=O 1s, 1=O 2s, 2-4=O 2px/y/z, 5-6=H 1s
+        mask1 = np.zeros(nao, dtype=bool)
+        mask1[[0, 1]] = True  # O 1s, 2s only -- pure sigma
+        mask2 = mask1.copy()
+        mask2[[2, 3, 4]] = True  # + O 2px, 2py, 2pz
+
+        dataframe = [
+            self._synthetic_row(2, -74.5, mask1),
+            self._synthetic_row(5, -74.9, mask2),
+        ]
+        cycle_report_history = [
+            {'nfunc': 2, 'orbitals': [(-20.0, None, True, None)]},
+            {'nfunc': 5, 'orbitals': [(-20.0, None, True, None)]},
+        ]
+        path = tmp_path / "report.txt"
+        write_cycle_report(str(path), dataframe, cycle_report_history, h2o_sto3g)
+        content = path.read_text()
+
+        assert "Current basis composition" in content
+        # Cycle 0: O has only sigma (2 functions: 1s, 2s), no pi yet.
+        assert "0 O: sigma=2" in content
+        # Cycle 1's "Added functions" should show the new p functions
+        # split into sigma (2pz) and pi (2px, 2py).
+        added_section = content.split("Cycle 1")[1].split("Current basis")[0]
+        assert "sigma [2pz]" in added_section
+        assert "pi [2px, 2py]" in added_section
+        # Cycle 1's cumulative composition: 2 sigma (1s,2s) + 1 sigma (2pz)
+        # = 3 sigma, 2 pi (2px,2py).
+        composition_section = content.split("Cycle 1")[1].split("Current basis")[1]
+        assert "0 O: pi=2  sigma=3" in composition_section
 
     def test_mismatched_nfunc_raises(self, h2o_sto3g, tmp_path):
         nao = h2o_sto3g.nao_nr()
