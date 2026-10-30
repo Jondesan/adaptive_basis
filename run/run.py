@@ -21,6 +21,8 @@ AVAIL_INIT_METHODS = [
     'atom',
     'sap',
     'huckel',
+    'mod_huckel',
+    'minao',
     'vsap'
 ]
 
@@ -259,6 +261,7 @@ def run_abs(
                     F = get_initial_fock_matrix(ig, scf_method_object, sap_basis=sapbs, xc=xc)
                     end = time()
                     S = scf_method_object.get_ovlp()
+
 
                     f.write("time stats [s]\n")
                     f.write("{:<17s}{:<17s}{:<17s}\n".format("t_HF", "t_fbyf", "t_sbys"))
@@ -544,7 +547,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--init_guesses", type=str, required=False, nargs='+',
-        default='all', choices=['all', 'scf', 'sap', 'atom', 'vsap', 'huckel'],
+        default='all', choices=['all', 'scf', 'sap', 'atom', 'vsap', 'huckel', 'mod_huckel', 'minao'],
         help="which initialization methods to use, 'all' will select all available methods"
     )
     parser.add_argument(
